@@ -1,0 +1,10 @@
+# Logs
+*.log
+
+# PDB files
+*.pdb
+
+# Environment, results and data directories
+gbsa_env/
+results/
+data/

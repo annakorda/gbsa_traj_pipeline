@@ -2,9 +2,9 @@
 """
 Create the pdb of only protein and ligand of a GPCRmd complex. Introduce
 the dyn ID and the number of frames you want to extract to PDB. By the 
-default the last 600 frameswill be extracted.
+default the last 600 frame swill be extracted.
 
-Output created in data/GPCRmd/dynID/XXX_fms
+Output created in data/GPCRmd/dynID/fms_{TOTAL_fms}/TRAJID_FRAMENUM.pdb
 """
 
 import json
@@ -31,7 +31,7 @@ def get_traj_path(dynID):
     return dynData
 
 
-def run_vmd(traj_paths, psf_path, output_dir, ligand_resname=None, fms=600):
+def run_vmd(traj_paths, psf_path, output_dir, fms, ligand_resname=None):
     """Open VMD, load PSF with each trajectory separately, and write PDBs
     for the last `fms` frames of each trajectory."""
 
@@ -93,9 +93,9 @@ def main():
     args = parser.parse_args()
 
     dynData= get_traj_path(args.dynID)
-    output_dir = f"data/GPCRmd/{args.dynID}/{args.nframes}_fms"
+    output_dir = f"data/GPCRmd/{args.dynID}/fms_{args.nframes}"
     os.makedirs(output_dir, exist_ok=True)
-    run_vmd(dynData['trajs'], dynData['psf'], output_dir, ligand_resname=dynData['lig_sname'])
+    run_vmd(dynData['trajs'], dynData['psf'], output_dir, args.nframes, ligand_resname=dynData['lig_sname'])
     
     print(f"PDB files saved in {output_dir}")
 
