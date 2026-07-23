@@ -33,7 +33,9 @@ def get_traj_path(dynID):
 
 def run_vmd(traj_paths, psf_path, output_dir, fms, ligand_resname=None):
     """Open VMD, load PSF with each trajectory separately, and write PDBs
-    for the last `fms` frames of each trajectory."""
+    for the last `fms` frames of each trajectory. Also writes a single
+    initial_frame.pdb from frame 0 of the first trajectory (assumed shared
+    across all replicates)."""
 
     if not os.path.isfile(psf_path):
         raise FileNotFoundError(f"PSF file not found: {psf_path}")
@@ -42,7 +44,7 @@ def run_vmd(traj_paths, psf_path, output_dir, fms, ligand_resname=None):
 
     vmd_lines = []
 
-    for traj_path in traj_paths:
+    for idx, traj_path in enumerate(traj_paths):
         if not os.path.isfile(traj_path):
             raise FileNotFoundError(f"Trajectory file not found: {traj_path}")
 
@@ -58,6 +60,11 @@ def run_vmd(traj_paths, psf_path, output_dir, fms, ligand_resname=None):
             print("Ligand resname not provided, extracting only protein and excluding water and ions.")
             selection = '(protein and chain P) or (not water and not ion and not protein and not lipid)'
         vmd_lines.append(f'set sel [atomselect top "{selection}"]')
+
+        # Write the shared initial frame once, from the first trajectory only
+        if idx == 0:
+            vmd_lines.append('animate goto 0')
+            vmd_lines.append(f'$sel writepdb "{output_dir}/initial_frame.pdb"')
 
         # Compute last `fms` frames of THIS trajectory
         vmd_lines.append('set nf [molinfo top get numframes]')
@@ -86,6 +93,20 @@ def run_vmd(traj_paths, psf_path, output_dir, fms, ligand_resname=None):
             pass
 
 
+def write_dyn_config(dynID, fms, trajIDs, lig_sdf, lig_resname, data_dyn_dir):
+    """Write a JSON config file to run gsba"""
+    config = {
+        "dynID": dynID,
+        "fms": fms,
+        "trajIDs": trajIDs,        # list of strings, e.g. ["17356_trj_1033", ...]
+        "lig_sdf": lig_sdf,
+        "lig_resname": lig_resname,
+    }
+    config_path = os.path.join(data_dyn_dir, "dyn_config.json")
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    print(f"Wrote dynamics config to {config_path}")
+
 def main():
     parser = argparse.ArgumentParser(description="Create protein-ligand PDB snapshots of a GPCRmd complex.")
     parser.add_argument("-dyn", dest="dynID", type=int, required=True, help="DynID of the GPCRmd complex.")
@@ -96,7 +117,7 @@ def main():
     output_dir = f"data/GPCRmd/{args.dynID}/fms_{args.nframes}"
     os.makedirs(output_dir, exist_ok=True)
     run_vmd(dynData['trajs'], dynData['psf'], output_dir, args.nframes, ligand_resname=dynData['lig_sname'])
-    
+    write_dyn_config(args.dynID, args.nframes, [t.split('/')[-1].split('.')[0] for t in dynData['trajs']], dynData['sdf'], dynData['lig_sname'], f"data/GPCRmd/{args.dynID}")
     print(f"PDB files saved in {output_dir}")
 
 
