@@ -22,7 +22,7 @@ set -u
 
 # --- config -------------------------------------------------------------
 dynID=1033
-fmsIn=4
+fmsIn=600
 data_dyn_dir="data/GPCRmd/${dynID}"
 mkdir -p "${data_dyn_dir}"
 # -------------------------------------------------------------------------
@@ -50,7 +50,9 @@ lig_resname=$(jq -r '.lig_resname' "${dyn_config}")
 mapfile -t trajIDs < <(jq -r '.trajIDs[]' "${dyn_config}")
 
 frame_dir="${data_dyn_dir}/fms_${fms}"
-results_frame_dir="results/GPCRmd/${dynID}/fms_${fms}"
+# _v2 suffix: keeps this run's topology/results separate from the original
+# v1 run still sitting in fms_${fms}/ - nothing here overwrites that.
+results_frame_dir="results/GPCRmd/${dynID}/fms_${fms}_v2"
 mkdir -p "${results_frame_dir}"
 
 # 1. Ligand: SDF -> mol2 with unique, indexed atom names. (shared, read-only after this)
@@ -75,7 +77,16 @@ trajID=${trajIDs[$SLURM_ARRAY_TASK_ID]}
 echo "[$(date)] Task ${SLURM_ARRAY_TASK_ID}: trajID=${trajID}"
 
 # Check required snapshots (pdbs) match the introduced number of frames per traj id
-frame_files=(${frame_dir}/${trajID}_[0-9]*.pdb)
+# NOTE: a plain glob here sorts lexicographically (..._100.pdb before ..._2.pdb),
+# scrambling frame order - confirmed by testing bash's actual glob expansion.
+# MODEL N in the scored trajectory must be the N-th frame numerically, not the
+# N-th glob match, so sort numerically by the trailing frame number instead.
+mapfile -t frame_files < <(
+  for f in "${frame_dir}"/"${trajID}"_[0-9]*.pdb; do
+    n=$(basename "$f" .pdb); n=${n##*_}
+    echo "${n} ${f}"
+  done | sort -n -k1,1 | cut -d' ' -f2-
+)
 frames=${#frame_files[@]}
 if [ "${frames}" -eq 0 ]; then
   echo "No frame PDB files found for ${trajID}" >&2
@@ -85,15 +96,17 @@ echo "[$(date)] Found ${frames} frame PDBs for ${trajID}"
 
 # 2. Clean receptor: each task uses the SAME shared initial_frame.pdb as input,
 #    but writes its own output into its own per-trajID folder -> no write collision.
-topo_dir="${data_dyn_dir}/topology_${trajID}"
+# _v2 topo_dir: separate from the original v1 topology_${trajID}/, which used
+# clean_receptor.py/build_trajectory.py (v1) and is left untouched for comparison.
+topo_dir="${data_dyn_dir}/topology_${trajID}_v2"
 mkdir -p "${topo_dir}"
 
-echo "2. python3 scripts/clean_receptor.py \
+echo "2. python3 scripts/clean_receptor_v2.py \
   -i ${frame_dir}/initial_frame.pdb \
   -o ${topo_dir}/receptor_clean.pdb \
   --drop-resname ${lig_resname}"
 
-python3 scripts/clean_receptor.py \
+python3 scripts/clean_receptor_v2.py \
   -i "${frame_dir}/initial_frame.pdb" \
   -o "${topo_dir}/receptor_clean.pdb" \
   --drop-resname "${lig_resname}"
@@ -116,13 +129,13 @@ mkdir -p "${gbsa_workdir}"
 
 combined_pdb="${gbsa_workdir}/${trajID}_trajectory_${fms}_frames.pdb"
 
-echo "4. python3 scripts/build_trajectory.py \
+echo "4. python3 scripts/build_trajectory_v2.py \
   -ref ${topo_dir}/complex.pdb \
   -frames ${frame_files[@]} \
   -ligand-resname ${lig_resname} \
   -o ${combined_pdb}"
 
-python3 scripts/build_trajectory.py \
+python3 scripts/build_trajectory_v2.py \
   -ref "${topo_dir}/complex.pdb" \
   -frames "${frame_files[@]}" \
   -ligand-resname "${lig_resname}" \
