@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=gbsa_6ZDR
 #SBATCH --partition=normal
-#SBATCH --ntasks=3
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=2000
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=32000
 #SBATCH --output=logs/slurm.%A_%a.out
 #SBATCH --error=logs/slurm.%A_%a.err
 #SBATCH --array=0-2
