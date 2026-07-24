@@ -1,167 +1,112 @@
 # gbsa_traj_pipeline
 
-A verified, working MM-GBSA test: scores 3 real MD snapshots of one
-receptor-ligand complex, no minimization - single-point GB scoring of
-each frame exactly as given. Everything below uses the actual files
-already in `data/` and produces the actual numbers we got running it.
+MM-GBSA scoring of MD snapshots against one built-once topology, no
+minimization - single-point GB scoring of each frame exactly as given.
 
-Design reasoning and known limitations are in `NOTES.md` - read that
-before running this on a different receptor/ligand.
+**Status: fixed and verified (v2).** The bugs that caused some frames to
+clash after matching (frozen reference atoms overlapping real ones, plus
+a frame-ordering bug and an MPI launch issue on the cluster) are fixed
+and confirmed clean across a real 3×600-frame production run - see
+`NOTES.md` for the full design reasoning and debugging history.
 
 ## Repo layout
 
 ```
 gbsa_traj_pipeline/
-├── data/
-│   ├── frame_100_GPCR_QGE.pdb    <- MD snapshot 1 (protein + ligand QGE only)
-│   ├── frame_1000_GPCR_QGE.pdb   <- MD snapshot 2
-│   ├── frame_2000_GPCR_QGE.pdb   <- MD snapshot 3
-│   └── 13903_mol_5236.sdf        <- QGE ligand, correct bond orders (C18H17NO4S)
-├── config/mmpbsa_gb.in           <- GB params matching earlier production runs (igb=8)
-├── env/gbsa_env.yml              <- environment spec
+├── data/                          <- not in git; extracted frames + ligand SDF live here
+├── config/mmpbsa_gb.in            <- GB params (igb=8, intdiel=4.0, extdiel=78.5, saltcon=0.15)
+├── env/gbsa_env.yml               <- environment spec
+├── run_GBSA.sh                    <- cluster entry point (sbatch), runs the full pipeline below
 ├── scripts/
-│   ├── fix_ligand_naming.py      <- SDF -> uniquely-named mol2 (once, for the ligand)
-│   ├── clean_receptor.py         <- strip receptor out of a complex frame
-│   ├── build_topology_once.py    <- build complex.top/pdb/index.ndx one time
-│   └── build_trajectory.py       <- remap the 3 frames onto that fixed atom order
-├── topology/                     <- created by step 3
-└── results/                      <- created by step 4-5
+│   ├── extract_snapshots.py       <- VMD: GPCRmd dyn -> per-frame PDBs (once per dynID)
+│   ├── fix_ligand_naming.py       <- SDF -> uniquely-named mol2 (once, for the ligand)
+│   ├── clean_receptor_v2.py       <- strip + fix receptor for pdb2gmx (use this, not v1)
+│   ├── build_topology_once.py     <- build complex.top/pdb/index.ndx one time
+│   └── build_trajectory_v2.py     <- remap frames onto that fixed atom order (use this, not v1)
+└── results/                       <- not in git; per-trajID Energy.csv/Dec.csv land here
 ```
 
-## Install
+`clean_receptor.py`/`build_trajectory.py` (no `_v2`) still exist for
+reference but are the old, buggy versions - don't use them for a real
+run. See `NOTES.md` if you're curious why they were replaced.
 
-Already exists on this machine:
+## Cluster usage (the normal way to run this)
 
 ```bash
-micromamba activate gbsa
+git clone <this repo> ~/free_energies/gbsa_traj_pipeline
+cd ~/free_energies/gbsa_traj_pipeline
+mkdir -p logs
+sbatch run_GBSA.sh
 ```
 
-Fresh machine:
+`run_GBSA.sh` already:
+- activates Marta's existing built env (`gbsa_env`) directly - read-only
+  use, doesn't interfere with her work, no need to build your own
+- runs the full pipeline (extract -> clean -> topology -> match -> score)
+  for all 3 GPCRmd replicates via `--array=0-2`
+- requests 32 cores per replicate and includes the OpenMPI fix needed
+  for `gmx_MMPBSA`'s internal `mpirun` to actually use them
 
+**Only thing you need to change to run this as yourself:** the two
+hardcoded path lines near the top of `run_GBSA.sh`:
 ```bash
-micromamba create -f env/gbsa_env.yml
-micromamba activate gbsa
+cd /users/gpcr/<you>/free_energies/gbsa_traj_pipeline
+repo_root=/users/gpcr/<you>/free_energies/gbsa_traj_pipeline
 ```
+Everything else (Marta's env, the OpenMPI fix, core count) works as-is.
 
-Sanity check:
-
+If you'd rather not reuse Marta's env (e.g. no `gpcr` group read access),
+build your own instead and swap the `conda activate` line accordingly:
 ```bash
-gmx --version
-unigbsa-traj -v
+conda env create -f env/gbsa_env.yml -p ./gbsa_env
 ```
 
-## Run the test
-
+**Data isn't in git** (`data/`/`results/` are gitignored). `run_GBSA.sh`
+extracts it automatically (step 0) the first time it runs for a given
+`dynID` - nothing manual needed if you're just running `sbatch
+run_GBSA.sh`. To pull frames for a **different** GPCRmd simulation
+yourself (own use outside the sbatch flow), it's the same script
+`run_GBSA.sh` calls, run directly:
 ```bash
-cd gbsa_traj_pipeline
-
-# 1. Ligand: SDF -> mol2 with unique, indexed atom names (once)
-python3 scripts/fix_ligand_naming.py \
-  -i data/13903_mol_5236.sdf -o data/ligand_named.mol2 -name QGE
-
-# 2. Receptor: clean one frame, dropping the QGE ligand atoms
-python3 scripts/clean_receptor.py \
-  -i data/frame_100_GPCR_QGE.pdb -o data/receptor_clean.pdb --drop-resname QGE
-
-# 3. Build the topology once (pdb2gmx + acpype/antechamber AM1-BCC - takes a bit)
-python3 scripts/build_topology_once.py \
-  -r data/receptor_clean.pdb -l data/ligand_named.mol2 -o topology -nt 4
-
-# 4. Build the 3-frame trajectory, matched to that topology's atom order
-python3 scripts/build_trajectory.py \
-  -ref topology/complex.pdb \
-  -frames data/frame_100_GPCR_QGE.pdb data/frame_1000_GPCR_QGE.pdb data/frame_2000_GPCR_QGE.pdb \
-  -ligand-resname QGE \
-  -o results/trajectory_3frames.pdb
-
-# 5. Score all 3 frames with GB (igb=8, matching earlier production runs)
-unigbsa-traj \
-  -i topology/complex.pdb -p topology/complex.top -ndx topology/index.ndx \
-  -t results/trajectory_3frames.pdb -f config/mmpbsa_gb.in -nt 3 \
-  2>&1 | tee results/gbsa_traj_test.log
+module load VMD
+python3 scripts/extract_snapshots.py -dyn <dynID> -frames 600
 ```
+`<dynID>` is the GPCRmd dynamics ID for the simulation you want (`1033`
+for the one this repo's fixes were verified against). This reads the
+shared `/GPCRmd_files/Precomputed/compl_info_new.json` (not anyone's
+personal directory) and writes `data/GPCRmd/<dynID>/fms_600/` plus
+`dyn_config.json`, exactly like step 0 of the pipeline does - it's fully
+self-contained, not dependent on anyone else's already-run copy.
 
-(All commands above assume `micromamba activate gbsa` from the Install step is already active in your shell.)
+## What "working" looks like
 
-Note on `-nt 3` in step 5: `gmx_MMPBSA` requires processes ≤ frames -
-`-nt` here must not exceed how many frames you're scoring.
+- `build_trajectory_v2.py`'s per-frame printout should show `0
+  kept-from-reference` for both protein and ligand, every frame. Any
+  nonzero count means an atom didn't match and is frozen at a stale
+  position - don't trust the energies until that's 0 (see `NOTES.md`
+  for how to debug it).
+- The per-trajID log (`results/.../<trajID>_gbsa_traj.log`) should end
+  with a clean results table and exit status 0, not a crash.
+- `TOTAL` in `Energy.csv` should sit in a normal range (roughly -10 to
+  -50 kcal/mol for a drug-like ligand), `complex`/`receptor`/`ligand`
+  in the hundreds of thousands - not NaN, not overflowing, not billions.
 
-## What to check as you go (don't skip these)
-
-- **Step 2** prints a summary - 0 unexpected dropped chains/HETATMs.
-- **Step 4** prints per-frame match counts. On this data you should see
-  `5076 matched, 10 kept-from-reference` for every frame. The 10 kept
-  are known, checked-safe leftovers (N-terminal cap hydrogens, 5 distant
-  histidines - see `NOTES.md`), not a new problem. If your numbers are
-  very different from this, don't trust the energies - see `NOTES.md`
-  for how to debug it (that's exactly how a real bug was caught here:
-  a naive version of this matched 0 ligand atoms and separately let a
-  hydrogen clash so hard it overflowed the energy calculation).
-
-## Expected result
-
-`results/gbsa_traj_test.log` should end with a table like:
-
-```
-   Frames mode       complex  ...      Gas  Solvation      TOTAL
-0       1   gb  9.943378e+05  ... -36.3712   9.487106 -26.884094
-1       2   gb  1.878720e+06  ... -37.9014   8.091573 -29.809827
-2       3   gb  1.146861e+06  ... -37.3585   8.818791 -28.539709
-```
-
-`TOTAL` is the per-frame MM-GBSA binding energy in kcal/mol: **-26.88,
--29.81, -28.54** for frames 100/1000/2000. The large `complex` column
-values are the receptor's own internal self-energy and cancel out in
-the complex-receptor-ligand subtraction - they're not a sign of a
-problem as long as `TOTAL` comes out in this normal range (roughly
--10 to -50 kcal/mol for a drug-like ligand). If instead you see
-`TOTAL` missing, NaN, or `gmx_MMPBSA` crashing with "Some energy terms
-are undefined," that's the clash/overflow failure mode - go back to
-step 4's match counts.
-
-## Adapting this to a different receptor/ligand/snapshot count
-
-Swap the file names in steps 1-5 for your own. Two things from
-`NOTES.md` you will hit immediately:
+## Adapting this to a different receptor/ligand
 
 1. Whatever your ligand's residue name is in the raw frames, pass it as
-   `-ligand-resname` in step 4 - **not** as `-ref-ligand-resname`, which
-   should stay `MOL` (`unigbsa` hardcodes the built ligand's resname to
-   `MOL` regardless of what your mol2 called it).
-2. `-nt` in step 5 must be ≤ your frame count.
+   `-ligand-resname` - **not** as `-ref-ligand-resname`, which should
+   stay `MOL` (`unigbsa` hardcodes the built ligand's resname to `MOL`
+   regardless of what your mol2 called it).
+2. `-nt` must be ≤ your frame count.
+3. `fix_ligand_naming.py` assumes the SDF's atom order already matches
+   the raw MD frame's atom order/naming - true for this ligand, not
+   guaranteed for a new one. Check `build_trajectory_v2.py`'s ligand
+   match count (should be 100%, not partial) before trusting a new
+   ligand's results.
 
-For more than a handful of frames, or a receptor with histidines/capped
-termini near the binding site, read `NOTES.md`'s caveats section first -
-this repo's matching logic has known gaps that happened not to matter
-for this specific test.
-
-## v2: `clean_receptor_v2.py` / `build_trajectory_v2.py`
-
-Fixes for topology-building bugs that caused some frames to clash after
-matching (frozen, unmatched reference atoms overlapping real ones):
-
-- **Histidines**: v1 collapsed `HSD`/`HSE`/`HSP` to generic `HIS`, so
-  `pdb2gmx` silently guessed one tautomer for all of them. v2 translates
-  to the literal AMBER names (`HID`/`HIE`/`HIP`) instead, so each
-  residue builds with its true, correct sidechain.
-- **Disulfides**: v1 only wrote informational `CONECT` records, which
-  `pdb2gmx` ignores. v2 renames bonded pairs `CYS`→`CYX`, so the bonds
-  form deterministically instead of depending on `pdb2gmx`'s own
-  distance-based auto-detect.
-- **Terminal caps**: v1 dropped the CHARMM N-terminal ACE and
-  C-terminal NME patch atoms, so `pdb2gmx` built charged termini
-  instead of the true capped ones. v2 splits both into proper `ACE`/
-  `NME` residues - on BOTH sides: `clean_receptor_v2.py` splits them in
-  the reference topology, and `build_trajectory_v2.py` applies the
-  identical split to each raw frame before matching, so residue counts
-  stay in sync on both sides (splitting only one side was tried twice
-  and reverted - it breaks ordinal alignment; see each script's
-  docstring for the full story). The two scripts must be used together.
-- **`build_trajectory_v2.py`** also reports protein and ligand match
-  counts separately (v1 combined them) and warns if any ligand atom
-  fails to match - ligand naming itself is unchanged.
-
-Verified end-to-end on this repo's 3 test frames: 0 kept-from-reference
-(down from v1's 10) on both protein and ligand, in every frame, for
-both chain termini - and a full `unigbsa-traj` rescore came out
-consistent with the original baseline TOTAL values.
+Read `NOTES.md` before running this on a receptor with a different
+construct (e.g. different termini/caps) - the v2 fixes here are specific
+to what this receptor actually has (ACE/NME caps, several histidine
+tautomers, 4 disulfides); a different receptor could have different
+gaps that need the same kind of direct verification, not just assumed
+to be fine.
