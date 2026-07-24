@@ -10,14 +10,17 @@
 
 set -euo pipefail
 
-cd /users/gpcr/mlopez/free_energies/gbsa_traj_pipeline
-repo_root=/users/gpcr/mlopez/free_energies/gbsa_traj_pipeline
+cd /users/gpcr/annak/free_energies/gbsa_traj_pipeline
+repo_root=/users/gpcr/annak/free_energies/gbsa_traj_pipeline
 
 set +u
 module load VMD
 module load Miniconda3/202601
 eval "$(conda shell.bash hook)"
-conda activate ./gbsa_env
+# Using Marta's already-built env directly (read-only use - activating and
+# running from it doesn't write into the env dir, so this doesn't interfere
+# with her work). Avoids rebuilding the whole env from scratch here.
+conda activate /users/gpcr/mlopez/free_energies/gbsa_traj_pipeline/gbsa_env
 set -u
 
 # --- config -------------------------------------------------------------
