@@ -23,6 +23,14 @@ eval "$(conda shell.bash hook)"
 conda activate /users/gpcr/mlopez/free_energies/gbsa_traj_pipeline/gbsa_env
 set -u
 
+# gmx_MMPBSA/unigbsa internally calls `mpirun -np <nt> --use-hwthread-cpus`
+# with no way to pass --oversubscribe via the CLI. At higher -nt (e.g. 32),
+# OpenMPI's own slot-detection under this SLURM allocation can come up short
+# and refuse to launch ("not enough slots available") even though the cores
+# were actually granted - this env var is OpenMPI's equivalent of
+# --oversubscribe, applied globally so the internal mpirun call picks it up.
+export OMPI_MCA_rmaps_base_oversubscribe=1
+
 # --- config -------------------------------------------------------------
 dynID=1033
 fmsIn=600
