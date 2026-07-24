@@ -148,13 +148,20 @@ matching (frozen, unmatched reference atoms overlapping real ones):
   `pdb2gmx` ignores. v2 renames bonded pairs `CYS`→`CYX`, so the bonds
   form deterministically instead of depending on `pdb2gmx`'s own
   distance-based auto-detect.
-- **N-terminal cap**: v1 dropped the CHARMM ACE-patch atoms
-  (`CAY`/`CY`/`OY`), so `pdb2gmx` built a charged terminus instead of
-  the true capped one. v2 splits them into a proper `ACE` residue.
-- **`build_trajectory_v2.py`**: reports protein and ligand match counts
-  separately (v1 combined them) and warns if any ligand atom fails to
-  match - matching logic and ligand naming are unchanged.
+- **Terminal caps**: v1 dropped the CHARMM N-terminal ACE and
+  C-terminal NME patch atoms, so `pdb2gmx` built charged termini
+  instead of the true capped ones. v2 splits both into proper `ACE`/
+  `NME` residues - on BOTH sides: `clean_receptor_v2.py` splits them in
+  the reference topology, and `build_trajectory_v2.py` applies the
+  identical split to each raw frame before matching, so residue counts
+  stay in sync on both sides (splitting only one side was tried twice
+  and reverted - it breaks ordinal alignment; see each script's
+  docstring for the full story). The two scripts must be used together.
+- **`build_trajectory_v2.py`** also reports protein and ligand match
+  counts separately (v1 combined them) and warns if any ligand atom
+  fails to match - ligand naming itself is unchanged.
 
-All three receptor-side fixes were verified against the installed
-`amber99sb-ildn.ff` and a real `pdb2gmx` run on this repo's test frame
-before being written here.
+Verified end-to-end on this repo's 3 test frames: 0 kept-from-reference
+(down from v1's 10) on both protein and ligand, in every frame, for
+both chain termini - and a full `unigbsa-traj` rescore came out
+consistent with the original baseline TOTAL values.

@@ -32,45 +32,32 @@ specbond.dat) before writing, not assumed:
    aminoacids.rtp defines CYX directly, so pdb2gmx builds the bonded
    topology deterministically with no auto-detection or prompt at all.
 
-3. N-terminal ACE cap: TRIED splitting CAY/CY/OY into a standalone ACE
-   residue (matching amber99sb-ildn's own ACE entry) and reverted it -
-   confirmed by actually testing it that it breaks something worse than
-   it fixes. Splitting adds a residue to the reference topology that
-   the raw frame doesn't have as a separate residue (the frame still
-   has ACE fused onto the first residue), which shifts every downstream
-   residue's ORDINAL index by +1 relative to the frame. Since matching
-   is purely ordinal+name based, and most residues share common atom
-   names (N, CA, C, O, CB...), this doesn't just fail to match - it
-   silently assigns the WRONG residue's real coordinates almost
-   everywhere downstream (confirmed: reference ordinal 1 = MET's real
-   atoms, frame ordinal 1 = PRO's real atoms, name-matched anyway).
-   That's undetectable by match-count alone and far worse than the
-   original frozen-atom bug. v2 therefore keeps v1's behavior here:
-   CAY/CY/OY (and their hydrogens) are dropped, same as before. This
-   remains a known, NOT fixed gap - the N-terminus still builds as a
-   charged terminus instead of the true capped one, same limitation as
-   v1, deliberately left alone rather than fixed unsafely.
-
-4. C-terminal NME cap: this construct also has a CHARMM methylamide
-   cap fused onto its LAST residue (NT/HNT/CAT/HT1-3, confirmed present
-   on the raw frame's final THR). ALSO tried splitting it into its own
-   NME residue (appended after the last residue, on the theory that
-   appending - unlike inserting at the front - wouldn't shift any
-   downstream residue's ordinal) and ALSO reverted it after testing:
-   appending is safe from the "wrong residue" corruption #3 hit, but
-   it doesn't dodge the underlying problem - the raw frame has no
-   separate residue there either way, so the new ordinal slot simply
-   has nothing to match against, and the ENTIRE NME residue (6 atoms:
-   N, H, CH3, HH31-33) freezes instead of just the 2 heavy atoms
-   (OC1/OC2) that freeze when it's dropped like v1. Splitting made it
-   worse, not better - confirmed by the same build+match test as
-   everything else here, not assumed.
-
-Both terminal caps are therefore handled exactly like v1: dropped, not
-fixed. Properly fixing either would require build_trajectory_v2.py to
-apply the same residue split to each raw FRAME too (so reference and
-frame residue counts stay identical), not just to the topology-building
-input - real, separate work, not attempted here.
+3. N-terminal ACE cap and C-terminal NME cap are both split into their
+   own standalone residues (CAY/CY/OY -> CH3/C/O as ACE; NT/CAT -> CH3/N
+   as NME - matching amber99sb-ildn's own ACE/NME entries). Two earlier
+   attempts at this (splitting only here, on the topology-building side)
+   were tried and reverted after actually testing them: splitting here
+   alone changes the reference's residue COUNT relative to the raw
+   frame (which still has the caps fused into their neighbor residue),
+   which breaks build_trajectory.py's pure ordinal-based matching -
+   either by shifting every downstream residue's ordinal (the ACE case:
+   confirmed reference ordinal 1 = MET's real atoms silently getting
+   matched against frame ordinal 1 = PRO's real atoms - undetectable,
+   far worse than not fixing it), or, appended at the end (the NME
+   case), by creating a reference ordinal with nothing to match at all
+   (the entire NME residue froze instead of just 2 atoms).
+   The fix that actually works, verified end-to-end (topology build +
+   real matching against all 3 test frames, checked the same ordinal
+   alignment that caught the earlier regressions): split the SAME way
+   on BOTH sides. This file does the reference/topology-building half.
+   build_trajectory_v2.py does the matching half - it applies the
+   identical split to each raw frame before computing ordinals, so
+   reference and frame residue counts stay identical throughout, and
+   the AMBER<->CHARMM name aliases needed for the caps' own atoms
+   (CH3/C/O/N vs CAY/CY/OY/NT/CAT) live there. Do not use either script
+   without the other - a topology built here now has 2 more residues
+   than v1, and only the paired build_trajectory_v2.py knows to expect
+   that.
 """
 import re
 import sys
@@ -78,7 +65,8 @@ import argparse
 
 HIS_VARIANTS = {"HSD", "HSE", "HSP", "HID", "HIE", "HIP"}
 HIS_TO_AMBER = {"HSD": "HID", "HSE": "HIE", "HSP": "HIP"}  # already-AMBER names pass through unchanged
-DROP_WEIRD_ATOMS = {"CAY", "CY", "OY", "CAT", "NT"}  # both cap splits were tried and reverted - see docstring
+NTERM_CAP_ATOMS = {"CAY": "CH3", "CY": "C", "OY": "O"}   # split into a standalone ACE residue
+CTERM_CAP_ATOMS = {"NT": "N", "CAT": "CH3"}              # split into a standalone NME residue
 
 AA_NAMES = {
     "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
@@ -175,6 +163,82 @@ def fmt_atom(d, new_serial):
             f"{d['x']:>8}{d['y']:>8}{d['z']:>8}{occ:>6}{temp:>6}          {element}\n")
 
 
+def _residue_blocks(atoms):
+    """Group atoms into contiguous (chain, resseq, icode) residue blocks, in file order."""
+    blocks, keys = [], []
+    i = 0
+    while i < len(atoms):
+        key = (atoms[i]["chain"], atoms[i]["resseq"], atoms[i]["icode"])
+        block = []
+        while i < len(atoms) and (atoms[i]["chain"], atoms[i]["resseq"], atoms[i]["icode"]) == key:
+            block.append(atoms[i])
+            i += 1
+        blocks.append(block)
+        keys.append(key)
+    return blocks, keys
+
+
+def split_terminal_caps(atoms):
+    """
+    Split CHARMM N-/C-terminal cap atoms fused onto the first/last residue
+    of each chain into standalone ACE/NME residues (renamed to amber
+    naming), matching amber99sb-ildn's own ACE/NME rtp entries. Must be
+    paired with build_trajectory_v2.py, which applies the identical split
+    to each raw frame - see this file's module docstring for why.
+    """
+    blocks, keys = _residue_blocks(atoms)
+    first_idx_of_chain, last_idx_of_chain = {}, {}
+    for idx, key in enumerate(keys):
+        chain = key[0]
+        if chain not in first_idx_of_chain:
+            first_idx_of_chain[chain] = idx
+        last_idx_of_chain[chain] = idx
+
+    out = []
+    n_ace, n_nme = 0, 0
+    for idx, block in enumerate(blocks):
+        chain = block[0]["chain"]
+        nterm_atoms = [a for a in block if a["name"].strip().upper() in NTERM_CAP_ATOMS]
+        cterm_atoms = [a for a in block if a["name"].strip().upper() in CTERM_CAP_ATOMS]
+
+        if nterm_atoms and idx != first_idx_of_chain[chain]:
+            raise ValueError(f"ACE-cap atoms found on a non-first residue of chain '{chain}' "
+                              f"(resseq {block[0]['resseq']}) - refusing to split, investigate first.")
+        if cterm_atoms and idx != last_idx_of_chain[chain]:
+            raise ValueError(f"NME-cap atoms found on a non-last residue of chain '{chain}' "
+                              f"(resseq {block[0]['resseq']}) - refusing to split, investigate first.")
+
+        rest = [a for a in block if a not in nterm_atoms and a not in cterm_atoms]
+
+        if nterm_atoms:
+            try:
+                ace_resseq = f"{int(block[0]['resseq']) - 1:>4d}"
+            except ValueError:
+                ace_resseq = block[0]["resseq"]
+            for a in nterm_atoms:
+                a["name"] = NTERM_CAP_ATOMS[a["name"].strip().upper()]
+                a["resname"] = "ACE"
+                a["resseq"] = ace_resseq
+            out.extend(nterm_atoms)
+            n_ace += 1
+
+        out.extend(rest)
+
+        if cterm_atoms:
+            try:
+                nme_resseq = f"{int(block[0]['resseq']) + 1:>4d}"
+            except ValueError:
+                nme_resseq = block[0]["resseq"]
+            for a in cterm_atoms:
+                a["name"] = CTERM_CAP_ATOMS[a["name"].strip().upper()]
+                a["resname"] = "NME"
+                a["resseq"] = nme_resseq
+            out.extend(cterm_atoms)
+            n_nme += 1
+
+    return out, n_ace, n_nme
+
+
 def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=None, verbose=True):
     """
     Clean a receptor-only PDB for GROMACS/amber pdb2gmx.
@@ -220,8 +284,6 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
                 continue
 
             nm = d["name"].strip().upper()
-            if nm in DROP_WEIRD_ATOMS:
-                continue
 
             if is_hydrogen(d):
                 n_dropped_h += 1
@@ -243,6 +305,8 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
 
     if not atoms:
         raise ValueError(f"No atoms survived cleaning for {input_pdb} (check chain/resname filters)")
+
+    atoms, n_ace, n_nme = split_terminal_caps(atoms)
 
     sg = []
     for i, d in enumerate(atoms):
@@ -307,6 +371,8 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
               f"{len(his_translated_residues)} residue(s)")
         print(f"  Disulfide bonds detected (SG-SG <= 2.2 A) and renamed CYS->CYX: {n_cyx} residue(s), "
               f"{len(conect_idx)} bond(s)")
+        print(f"  Terminal caps split into standalone residues: {n_ace} ACE, {n_nme} NME "
+              f"(must be matched by build_trajectory_v2.py, not v1's build_trajectory.py)")
 
 
 def main():
