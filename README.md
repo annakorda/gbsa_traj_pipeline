@@ -134,3 +134,27 @@ For more than a handful of frames, or a receptor with histidines/capped
 termini near the binding site, read `NOTES.md`'s caveats section first -
 this repo's matching logic has known gaps that happened not to matter
 for this specific test.
+
+## v2: `clean_receptor_v2.py` / `build_trajectory_v2.py`
+
+Fixes for topology-building bugs that caused some frames to clash after
+matching (frozen, unmatched reference atoms overlapping real ones):
+
+- **Histidines**: v1 collapsed `HSD`/`HSE`/`HSP` to generic `HIS`, so
+  `pdb2gmx` silently guessed one tautomer for all of them. v2 translates
+  to the literal AMBER names (`HID`/`HIE`/`HIP`) instead, so each
+  residue builds with its true, correct sidechain.
+- **Disulfides**: v1 only wrote informational `CONECT` records, which
+  `pdb2gmx` ignores. v2 renames bonded pairs `CYS`→`CYX`, so the bonds
+  form deterministically instead of depending on `pdb2gmx`'s own
+  distance-based auto-detect.
+- **N-terminal cap**: v1 dropped the CHARMM ACE-patch atoms
+  (`CAY`/`CY`/`OY`), so `pdb2gmx` built a charged terminus instead of
+  the true capped one. v2 splits them into a proper `ACE` residue.
+- **`build_trajectory_v2.py`**: reports protein and ligand match counts
+  separately (v1 combined them) and warns if any ligand atom fails to
+  match - matching logic and ligand naming are unchanged.
+
+All three receptor-side fixes were verified against the installed
+`amber99sb-ildn.ff` and a real `pdb2gmx` run on this repo's test frame
+before being written here.
