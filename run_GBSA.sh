@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=gbsa_6ZDR
+#SBATCH --job-name=gbsa_6ZDV
 #SBATCH --partition=normal
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -10,8 +10,8 @@
 
 set -euo pipefail
 
-cd /users/gpcr/annak/free_energies/gbsa_traj_pipeline
-repo_root=/users/gpcr/annak/free_energies/gbsa_traj_pipeline
+repo_root=/users/gpcr/mlopez/free_energies/gbsa_traj_pipeline
+cd "${repo_root}"
 
 set +u
 module load VMD
@@ -20,7 +20,7 @@ eval "$(conda shell.bash hook)"
 # Using Marta's already-built env directly (read-only use - activating and
 # running from it doesn't write into the env dir, so this doesn't interfere
 # with her work). Avoids rebuilding the whole env from scratch here.
-conda activate /users/gpcr/mlopez/free_energies/gbsa_traj_pipeline/gbsa_env
+conda activate "${repo_root}/gbsa_env"
 set -u
 
 # gmx_MMPBSA/unigbsa internally calls `mpirun -np <nt> --use-hwthread-cpus`
@@ -32,13 +32,21 @@ set -u
 export OMPI_MCA_rmaps_base_oversubscribe=1
 
 # --- config -------------------------------------------------------------
-dynID=1033
+dynID=828
 fmsIn=600
-data_dyn_dir="data/GPCRmd/${dynID}"
+
+### OPT A: use trajs from GPCRmd (default)
+#data_source="GPCRmd"
+
+### OPT B: Analyze trajs not loaded into GPCRmd, use manually created json
+data_source="non_loaded_trajs"
+inputData="${repo_root}/data/non_loaded_trajs/extra_reps_828_1033.json"
+
+data_dyn_dir="data/${data_source}/${dynID}"
 mkdir -p "${data_dyn_dir}"
 # -------------------------------------------------------------------------
 
-# 0. Create PDB snapshots of the three replicates of the GPCRmd trajectory
+# 0. Create PDB snapshots of the three replicates 
 dyn_config="${data_dyn_dir}/dyn_config.json"
 snap_lockfile="${data_dyn_dir}/.snapshots.lock"
 snap_donefile="${data_dyn_dir}/.snapshots.done"
@@ -47,7 +55,7 @@ snap_donefile="${data_dyn_dir}/.snapshots.done"
   flock -x 201
   if [ ! -f "${snap_donefile}" ]; then
     echo "[$(date)] Task ${SLURM_ARRAY_TASK_ID}: extracting snapshots"
-    python3 scripts/extract_snapshots.py -dyn "${dynID}" -frames "${fmsIn}"
+    python3 scripts/extract_snapshots.py -dyn "${dynID}" -frames "${fmsIn}" -input_json "${inputData}" # For OPT B: -input_traj "${inputData}" 
     touch "${snap_donefile}"
   else
     echo "[$(date)] Task ${SLURM_ARRAY_TASK_ID}: snapshots already extracted, skipping"
@@ -63,7 +71,7 @@ mapfile -t trajIDs < <(jq -r '.trajIDs[]' "${dyn_config}")
 frame_dir="${data_dyn_dir}/fms_${fms}"
 # _v2 suffix: keeps this run's topology/results separate from the original
 # v1 run still sitting in fms_${fms}/ - nothing here overwrites that.
-results_frame_dir="results/GPCRmd/${dynID}/fms_${fms}_v2"
+results_frame_dir="results/${data_source}/${dynID}/fms_${fms}_v2"
 mkdir -p "${results_frame_dir}"
 
 # 1. Ligand: SDF -> mol2 with unique, indexed atom names. (shared, read-only after this)

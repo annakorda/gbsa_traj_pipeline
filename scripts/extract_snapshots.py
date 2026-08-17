@@ -4,7 +4,10 @@ Create the pdb of only protein and ligand of a GPCRmd complex. Introduce
 the dyn ID and the number of frames you want to extract to PDB. By the 
 default the last 600 frame swill be extracted.
 
-Output created in data/GPCRmd/dynID/fms_{TOTAL_fms}/TRAJID_FRAMENUM.pdb
+Output created in 
+data/GPCRmd/dynID/fms_{TOTAL_fms}/TRAJID_FRAMENUM.pdb
+or
+data/non_loaded_trajs/dynID/fms_{TOTAL_fms}/TRAJID_FRAMENUM.pdb
 """
 
 import json
@@ -23,6 +26,25 @@ def get_traj_path(dynID):
         if value['dyn_id']==dynID:
             dynData['trajs'] = ['/GPCRmd_files/Dynamics/'+i for i in value['traj_fnames']]
             dynData['psf'] = '/GPCRmd_files' + value['topo_f']
+            dynData['lig_sname'] = value['lig_sname']
+            sdfs_all=value['dyn_comp']
+            sdfs_lig=[i for i in sdfs_all if i['resname']==value['lig_sname']] 
+            dynData['sdf']= '/GPCRmd_files' + sdfs_lig[0]['sdfile']
+    print(f"""- Found {dynData['trajs']} \nand {dynData['psf']} for dynID {dynID}. \n- Ligand name: {dynData['lig_sname']}, SDF: {dynData['sdf']}""")
+    return dynData
+
+def get_traj_path_from_input_json(dynID, inputData):
+    """Get the traj paths, psf, ligand name and sdf of a complex from 
+    a manually acreated json file (for reps not in GPCRmd)"""
+    dynData={}
+    ####NAT:json path modified to point to a dummy version that has the new replicas in it 
+    jsonPath=inputData
+    with open(jsonPath, "r") as f:
+        jsonDic = json.load(f)
+    for key, value in jsonDic.items():
+        if value['dyn_id']==dynID:
+            dynData['trajs'] = [''+i for i in value['traj_fnames']]
+            dynData['psf'] = '' + value['topo_f']
             dynData['lig_sname'] = value['lig_sname']
             sdfs_all=value['dyn_comp']
             sdfs_lig=[i for i in sdfs_all if i['resname']==value['lig_sname']] 
@@ -111,13 +133,20 @@ def main():
     parser = argparse.ArgumentParser(description="Create protein-ligand PDB snapshots of a GPCRmd complex.")
     parser.add_argument("-dyn", dest="dynID", type=int, required=True, help="DynID of the GPCRmd complex.")
     parser.add_argument("-frames", dest="nframes", type=int, default=600, help="Number of frames to extract (default: last 600).")
+    parser.add_argument("-input_json", dest="input_json", type=str, default=None, help="Path to a manually created JSON file for non-GPCRmd trajectories.")
     args = parser.parse_args()
 
-    dynData= get_traj_path(args.dynID)
-    output_dir = f"data/GPCRmd/{args.dynID}/fms_{args.nframes}"
+    if args.input_json:
+        dataSource = "non_loaded_trajs"
+        dynData = get_traj_path_from_input_json(args.dynID, args.input_json)
+    else:
+        dataSource = "GPCRmd"
+        dynData = get_traj_path(args.dynID)
+
+    output_dir = f"data/{dataSource}/{args.dynID}/fms_{args.nframes}"    
     os.makedirs(output_dir, exist_ok=True)
     run_vmd(dynData['trajs'], dynData['psf'], output_dir, args.nframes, ligand_resname=dynData['lig_sname'])
-    write_dyn_config(args.dynID, args.nframes, [t.split('/')[-1].split('.')[0] for t in dynData['trajs']], dynData['sdf'], dynData['lig_sname'], f"data/GPCRmd/{args.dynID}")
+    write_dyn_config(args.dynID, args.nframes, [t.split('/')[-1].split('.')[0] for t in dynData['trajs']], dynData['sdf'], dynData['lig_sname'], f"data/{dataSource}/{args.dynID}")
     print(f"PDB files saved in {output_dir}")
 
 
