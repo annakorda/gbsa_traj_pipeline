@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=gbsa_6ZDV
+#SBATCH --job-name=gbsa828
 #SBATCH --partition=normal
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -32,15 +32,16 @@ set -u
 export OMPI_MCA_rmaps_base_oversubscribe=1
 
 # --- config -------------------------------------------------------------
-dynID=828
+dynID=25
 fmsIn=600
 
 ### OPT A: use trajs from GPCRmd (default)
-#data_source="GPCRmd"
+data_source="GPCRmd"
 
 ### OPT B: Analyze trajs not loaded into GPCRmd, use manually created json
-data_source="non_loaded_trajs"
-inputData="${repo_root}/data/non_loaded_trajs/extra_reps_828_1033.json"
+# data_source="non_loaded_trajs"
+# inputData="${repo_root}/data/non_loaded_trajs/extra_reps_828_1033.json"
+# For OPT B also add `-input_json "${inputData}"` to the extract_snapshots.py call below.
 
 data_dyn_dir="data/${data_source}/${dynID}"
 mkdir -p "${data_dyn_dir}"
@@ -55,7 +56,7 @@ snap_donefile="${data_dyn_dir}/.snapshots.done"
   flock -x 201
   if [ ! -f "${snap_donefile}" ]; then
     echo "[$(date)] Task ${SLURM_ARRAY_TASK_ID}: extracting snapshots"
-    python3 scripts/extract_snapshots.py -dyn "${dynID}" -frames "${fmsIn}" -input_json "${inputData}" # For OPT B: -input_traj "${inputData}" 
+    python3 scripts/extract_snapshots.py -dyn "${dynID}" -frames "${fmsIn}" # For OPT B add: input_json "${inputData}" 
     touch "${snap_donefile}"
   else
     echo "[$(date)] Task ${SLURM_ARRAY_TASK_ID}: snapshots already extracted, skipping"
