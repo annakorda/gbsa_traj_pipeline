@@ -47,19 +47,22 @@ sbatch run_GBSA.sh
 - requests 32 cores per replicate and includes the OpenMPI fix needed
   for `gmx_MMPBSA`'s internal `mpirun` to actually use them
 
-**Only thing you need to change to run this as yourself:** the two
-hardcoded path lines near the top of `run_GBSA.sh`:
-```bash
-cd /users/gpcr/<you>/free_energies/gbsa_traj_pipeline
-repo_root=/users/gpcr/<you>/free_energies/gbsa_traj_pipeline
-```
-Everything else (Marta's env, the OpenMPI fix, core count) works as-is.
+**Nothing to edit to run this as yourself.** `repo_root` is derived from
+`SLURM_SUBMIT_DIR` (the directory you ran `sbatch` from), not hardcoded -
+as long as you `cd` into your own clone before running `sbatch run_GBSA.sh`
+(as above), it just works. Everything else (Marta's env, the OpenMPI fix,
+core count) works as-is too.
 
 If you'd rather not reuse Marta's env (e.g. no `gpcr` group read access),
-build your own instead and swap the `conda activate` line accordingly:
+build your own instead:
 ```bash
 conda env create -f env/gbsa_env.yml -p ./gbsa_env
+cp local.env.sh.example local.env.sh
+# then in local.env.sh: gbsa_env_path="${repo_root}/gbsa_env"
 ```
+`local.env.sh` (gitignored) is for any per-user override like this one -
+it's sourced automatically if present, so a future `git pull` never
+clobbers it and you never hand-edit `run_GBSA.sh` itself.
 
 **Data isn't in git** (`data/`/`results/` are gitignored). `run_GBSA.sh`
 extracts it automatically (step 0) the first time it runs for a given

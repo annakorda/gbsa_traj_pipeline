@@ -10,8 +10,19 @@
 
 set -euo pipefail
 
-repo_root=/users/gpcr/mlopez/free_energies/gbsa_traj_pipeline
+# repo_root is derived, not hardcoded, so this script works unmodified from
+# anyone's own checkout. SLURM sets SLURM_SUBMIT_DIR to wherever `sbatch` was
+# run from (per the README: cd into your own clone, then `sbatch run_GBSA.sh`)
+# - that's always the right repo_root. The $(pwd) fallback is only for
+# running this script directly with bash (no SLURM) while testing.
+repo_root="${SLURM_SUBMIT_DIR:-$(pwd)}"
 cd "${repo_root}"
+
+# Per-user overrides (e.g. your own gbsa_env_path if you don't want to reuse
+# Marta's) live in local.env.sh, which is gitignored - see local.env.sh.example.
+if [ -f "${repo_root}/local.env.sh" ]; then
+  source "${repo_root}/local.env.sh"
+fi
 
 set +u
 module load VMD
@@ -19,8 +30,12 @@ module load Miniconda3/202601
 eval "$(conda shell.bash hook)"
 # Using Marta's already-built env directly (read-only use - activating and
 # running from it doesn't write into the env dir, so this doesn't interfere
-# with her work). Avoids rebuilding the whole env from scratch here.
-conda activate "${repo_root}/gbsa_env"
+# with her work). Avoids rebuilding the whole env from scratch here. Kept
+# independent of repo_root (not "${repo_root}/gbsa_env") since repo_root is
+# now per-user but the shared env still lives in Marta's checkout regardless
+# of whose repo_root this is - override via local.env.sh if you build your own.
+gbsa_env_path="${gbsa_env_path:-/users/gpcr/mlopez/free_energies/gbsa_traj_pipeline/gbsa_env}"
+conda activate "${gbsa_env_path}"
 set -u
 
 # gmx_MMPBSA/unigbsa internally calls `mpirun -np <nt> --use-hwthread-cpus`
