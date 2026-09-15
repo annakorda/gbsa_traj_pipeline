@@ -3,11 +3,13 @@
 MM-GBSA scoring of MD snapshots against one built-once topology, no
 minimization - single-point GB scoring of each frame exactly as given.
 
-**Status: fixed and verified (v2).** The bugs that caused some frames to
-clash after matching (frozen reference atoms overlapping real ones, plus
-a frame-ordering bug and an MPI launch issue on the cluster) are fixed
-and confirmed clean across a real 3×600-frame production run - see
-`NOTES.md` for the full design reasoning and debugging history.
+**Status:** the core v2 pipeline (single-fragment receptors) is confirmed
+clean across a real 3×600-frame production run. Three further fixes -
+multi-fragment receptors (e.g. ICL3-truncated constructs), ligand net
+charge, and ligand atom-identity matching - are implemented and validated
+with real `gmx`/`antechamber`/`unigbsa-traj` against 7 real GPCRmd dyns,
+but only at single-frame scale so far, not yet a full production run.
+See `NOTES.md` for the full design reasoning and debugging history.
 
 ## Repo layout
 
@@ -19,16 +21,12 @@ gbsa_traj_pipeline/
 ├── run_GBSA.sh                    <- cluster entry point (sbatch), runs the full pipeline below
 ├── scripts/
 │   ├── extract_snapshots.py       <- VMD: GPCRmd dyn -> per-frame PDBs (once per dynID)
-│   ├── fix_ligand_naming.py       <- SDF -> uniquely-named mol2 (once, for the ligand)
-│   ├── clean_receptor_v2.py       <- strip + fix receptor for pdb2gmx (use this, not v1)
+│   ├── fix_ligand_naming.py       <- SDF -> named mol2 + net-charge/atom-map sidecars (once, for the ligand)
+│   ├── clean_receptor_v2.py       <- strip + fix receptor for pdb2gmx
 │   ├── build_topology_once.py     <- build complex.top/pdb/index.ndx one time
-│   └── build_trajectory_v2.py     <- remap frames onto that fixed atom order (use this, not v1)
+│   └── build_trajectory_v2.py     <- remap frames onto that fixed atom order
 └── results/                       <- not in git; per-trajID Energy.csv/Dec.csv land here
 ```
-
-`clean_receptor.py`/`build_trajectory.py` (no `_v2`) still exist for
-reference but are the old, buggy versions - don't use them for a real
-run. See `NOTES.md` if you're curious why they were replaced.
 
 ## Cluster usage (the normal way to run this)
 
@@ -101,11 +99,12 @@ self-contained, not dependent on anyone else's already-run copy.
    stay `MOL` (`unigbsa` hardcodes the built ligand's resname to `MOL`
    regardless of what your mol2 called it).
 2. `-nt` must be ≤ your frame count.
-3. `fix_ligand_naming.py` assumes the SDF's atom order already matches
-   the raw MD frame's atom order/naming - true for this ligand, not
-   guaranteed for a new one. Check `build_trajectory_v2.py`'s ligand
-   match count (should be 100%, not partial) before trusting a new
-   ligand's results.
+3. `fix_ligand_naming.py -frame-pdb` resolves the ligand's real atom
+   identity against a raw MD frame (direct name match, falling back to
+   bond-graph matching - see `NOTES.md`) and writes a `<ligand>.atom_map`
+   sidecar; pass it to `build_trajectory_v2.py -ligand-atom-map`. Check
+   the printed match count (should be 100%, not partial) before trusting
+   a new ligand's results.
 
 Read `NOTES.md` before running this on a receptor with a different
 construct (e.g. different termini/caps) - the v2 fixes here are specific

@@ -12,3 +12,5 @@ logs/
 
 # Per-user overrides for run_GBSA.sh (see local.env.sh.example)
 local.env.sh
+
+__pycache__/

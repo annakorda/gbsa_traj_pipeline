@@ -22,15 +22,11 @@ Three options, in order of reliability:
 1. **A matching PubChem/ChEMBL SDF** (if the exact compound + protonation
    state is known) - most reliable for bond orders, since it's not
    geometry-guessed. The catch: its atom *names* almost certainly won't
-   match the names used in your MD system's ligand, and `build_trajectory.py`
-   matches ligand atoms by name. If you go this route, verify the match
-   count printed by `build_trajectory.py` isn't 0/low - if names don't
-   line up, you need a one-time atom-name remap (e.g. via a graph/substructure
-   match) before this works, otherwise every frame silently reuses the
-   PubChem structure's coordinates for the ligand instead of your actual
-   simulated pose. 3D coordinates in the SDF don't matter either way -
-   only the 2D bond graph and formal charges do, since coordinates get
-   overwritten by each frame's real pose downstream.
+   match the names used in your MD system's ligand - this is expected and
+   now handled automatically, see "Ligand atom identity" below. 3D
+   coordinates in the SDF don't matter either way - only the 2D bond graph
+   and formal charges do, since coordinates get overwritten by each
+   frame's real pose downstream.
 2. **Maestro** (or any tool you already trust for bond assignment) - fine,
    same rule applies: only the bonds/formal-charge assignment need to be
    right, not the specific conformer geometry, since that also gets
@@ -83,49 +79,48 @@ exhaustive for a receptor with residue types this one didn't stress.
 "The frozen-atom clash bug" below for what a nonzero count means and how
 to debug it.
 
-## The frozen-atom clash bug (v1 -> v2), and why it mattered
+## The frozen-atom clash bug, and why it mattered
 
-Any reference atom `build_trajectory.py`/`_v2.py` can't match in a given
-frame keeps its topology-build-time coordinate, frozen, for every output
-frame. This is silent - no error, no warning in v1 - it just quietly
-substitutes a stale position. It only shows up as a clash in whichever
-frames happen to bring a real, moving neighbor close to that fixed point,
-which is why the symptom is "some frames spike, most don't," not a clean
-crash every time.
+Any reference atom `build_trajectory_v2.py` can't match in a given frame
+keeps its topology-build-time coordinate, frozen, for every output frame.
+This is silent - no error, no warning - it just quietly substitutes a
+stale position. It only shows up as a clash in whichever frames happen to
+bring a real, moving neighbor close to that fixed point, which is why the
+symptom is "some frames spike, most don't," not a clean crash every time.
 
 Three concrete sources of frozen atoms were found and fixed by directly
 diagnosing this construct's actual chemistry (not by guessing):
 
-1. **Histidine tautomer discarded.** v1's `clean_receptor.py` collapsed
-   `HSD`/`HSE`/`HSP` (CHARMM tautomer names) to generic `HIS` before
-   `pdb2gmx` ever saw them. `pdb2gmx` was then called with no `-his` flag
+1. **Histidine tautomer.** Collapsing `HSD`/`HSE`/`HSP` (CHARMM tautomer
+   names) to generic `HIS` before `pdb2gmx` ever sees them is a trap:
+   `pdb2gmx` is called with no `-his` flag
    (`unigbsa/simulation/topology.py::build_protein`), so it silently
-   applied one uniform default tautomer to every histidine - wrong for
+   applies one uniform default tautomer to every histidine - wrong for
    whichever ones weren't actually that state. Fix (`clean_receptor_v2.py`):
    translate to the literal AMBER names (`HID`/`HIE`/`HIP`) instead of
    collapsing them - confirmed `amber99sb-ildn.ff/aminoacids.rtp` defines
    these directly, so `pdb2gmx` builds the correct sidechain per residue
    automatically, no flag or prompt needed.
-2. **Disulfides never actually communicated to pdb2gmx.** v1 detected
-   SG-SG distances ≤2.2 Å and wrote `CONECT` records - but confirmed via
-   `pdb2gmx`'s own log output that **`pdb2gmx` ignores CONECT entirely**
-   (`WARNING: all CONECT records are ignored`). It was relying on
-   `pdb2gmx`'s own distance-based auto-detect (via `specbond.dat`) instead,
-   which triggers an interactive per-pair prompt that a scripted, piped
-   run can't reliably answer for every pair. Fix: rename both residues of
-   a detected disulfide pair `CYS`→`CYX` directly - confirmed
-   `amber99sb-ildn.ff` defines `CYX`, so the bond forms deterministically
-   with zero ambiguity, verified against `pdb2gmx`'s own geometry table
-   (the renamed pairs sit at 0.2-1.0 Å in its internal SG-SG distance
-   matrix; everything left as plain `CYS` sits several Å apart - the
-   renaming picked exactly the same pairs `pdb2gmx`'s own geometry agrees
-   are real bonds).
-3. **Terminal caps dropped instead of translated.** This construct's raw
+2. **Disulfides must be communicated to pdb2gmx by residue naming, not
+   CONECT.** Detecting SG-SG distances ≤2.2 Å and writing `CONECT`
+   records doesn't work - confirmed via `pdb2gmx`'s own log output that
+   **`pdb2gmx` ignores CONECT entirely** (`WARNING: all CONECT records
+   are ignored`). Relying on `pdb2gmx`'s own distance-based auto-detect
+   (via `specbond.dat`) instead triggers an interactive per-pair prompt
+   that a scripted, piped run can't reliably answer for every pair. Fix:
+   rename both residues of a detected disulfide pair `CYS`→`CYX` directly
+   - confirmed `amber99sb-ildn.ff` defines `CYX`, so the bond forms
+   deterministically with zero ambiguity, verified against `pdb2gmx`'s
+   own geometry table (the renamed pairs sit at 0.2-1.0 Å in its internal
+   SG-SG distance matrix; everything left as plain `CYS` sits several Å
+   apart - the renaming picked exactly the same pairs `pdb2gmx`'s own
+   geometry agrees are real bonds).
+3. **Terminal caps must be translated, not dropped.** This construct's raw
    frames have a CHARMM N-terminal ACE patch fused onto the first residue
    (`CAY`/`HY1-3`/`CY`/`OY`) and a C-terminal NME patch fused onto the
-   last (`NT`/`HNT`/`CAT`/`HT1-3`) - both silently dropped by v1's
-   `DROP_WEIRD_ATOMS`, so `pdb2gmx` built ordinary charged termini instead
-   of the true neutral capped ones.
+   last (`NT`/`HNT`/`CAT`/`HT1-3`). Simply dropping these atoms leaves
+   `pdb2gmx` to build ordinary charged termini instead of the true
+   neutral capped ones.
 
    **This one took two failed attempts to fix correctly - worth
    understanding why, since it's a real trap for anyone touching this
@@ -159,9 +154,9 @@ diagnosing this construct's actual chemistry (not by guessing):
    counts and ordinal alignment stay in sync throughout. Verified by
    directly re-checking ordinal 0/1 and the last two ordinals against
    both reference and frame content after the fix - not just trusting a
-   lower kept-count. **The two scripts must be used as a pair** - a
-   topology built by `clean_receptor_v2.py` has 2 more residues than v1
-   and will silently misalign if matched with the old `build_trajectory.py`.
+   lower kept-count. **The two scripts must be used as a pair** - matching
+   `clean_receptor_v2.py`'s output against a mismatched frame-side split
+   will silently misalign every residue.
 
    A real implementation bug was also caught this way, worth flagging as
    a general caution: an early version of the frame-side split computed
@@ -245,3 +240,116 @@ down on this construct's production data - reusable for the next one:
   32), which is why this surfaced as tasks failing to schedule /
   needlessly spanning multiple nodes once `--cpus-per-task` was raised
   from 1.
+- **`repo_root`**: derived from `SLURM_SUBMIT_DIR` (falls back to `$(pwd)`
+  outside SLURM), not hardcoded. `sbatch` sets `SLURM_SUBMIT_DIR` to
+  wherever it was invoked from, so as long as you `cd` into your own
+  clone before `sbatch run_GBSA.sh` (as the README says), this is always
+  correct with nothing to edit. Previously this was a literal path,
+  meaning every user had to hand-edit it back after every pull - easy to
+  forget and silently run against someone else's checkout. The shared
+  `gbsa_env` path is intentionally a separate variable
+  (`gbsa_env_path`), not derived from `repo_root`, since the env lives in
+  Marta's checkout regardless of whose `repo_root` this is. Per-user
+  overrides (e.g. your own `gbsa_env_path` if you build your own env)
+  live in `local.env.sh` (gitignored, see `local.env.sh.example`),
+  sourced automatically if present.
+
+## Multi-fragment receptors (a chain isn't always one continuous chain)
+
+`clean_receptor_v2.py`/`build_trajectory_v2.py`'s cap-splitting originally
+assumed exactly one ACE/NME pair per chain, at the chain's first/last
+residue. Confirmed false for real GPCRmd dyns 15, 25 and 57: `clean_receptor_v2.py`
+raised `NME-cap atoms found on a non-last residue`. Traced to the raw PDB's
+own segid column (VMD writes it, though the PDB parser doesn't use it for
+matching): chain `P` there is actually two separate PSF segments (`P0`,
+`P1`) sharing one PDB chain letter, with a real residue-numbering gap
+(resseq 250 -> 270) in between - almost certainly ICL3 replaced by a
+crystallization fusion partner (T4-lysozyme/BRIL-style construct) that was
+stripped out before the MD run, leaving two independently-capped
+fragments. The other 4 dyns tested (16, 26, 55, 58) have only one segment.
+
+Fix: fragment boundaries are now detected purely from where the cap atoms
+themselves appear (an ACE-style atom is only valid immediately after a
+fragment just closed by an NME-style atom, or at a chain's very first
+residue) instead of a fixed first/last-of-chain assumption - handles any
+number of fragments, fused anywhere in a chain, with no further changes
+needed. `clean_receptor_v2.py` also now numbers synthesized ACE/NME
+residues by reusing the adjacent real residue's resSeq with a fresh
+insertion code (`250A`) instead of `resseq±1` - the old arithmetic would
+silently collide if a future fusion break has no numbering gap - and
+inserts an explicit `TER` at every fragment boundary. Validated directly
+with real `gmx pdb2gmx` (not just the Python logic): all 7 dyns build with
+exit 0 and zero interactive prompts; the two-fragment dyns correctly log
+`Identified residue ACE33/NME250` and `ACE270/NME358` as two separate
+starting/ending termini, producing two separate `.itp` files.
+
+## Ligand net charge
+
+`unigbsa`'s own net-charge auto-detection (`obtain_net_charge()`, which
+round-trips the ligand file through OpenBabel) only recovers a nonzero
+charge from an explicit SYBYL atom type (e.g. `N.4`) - confirmed it
+silently returns 0 for a plain mol2 with generic element-symbol atom types,
+which is exactly what `fix_ligand_naming.py` writes. A wrong net charge
+doesn't fail loudly here - it hands `antechamber`/`sqm` an impossible odd
+electron count for whatever the true charged/neutral split should be, and
+`sqm` just crashes. Confirmed on real data: GPCRmd ligand Y00 (dyn 15/16)
+has an SDF `M  CHG` record giving its amine nitrogen a +1 formal charge;
+with that lost, `unigbsa` computed net charge 0, giving `sqm` 163
+electrons (odd) for a claimed charge-0 molecule. All 7 ligands tested
+across dyns 15/16/25/26/55/57/58 turned out to carry a +1 charge (all
+protonated amines) - this isn't a rare edge case, it's most/all real
+GPCRmd ligands.
+
+Fix: `fix_ligand_naming.py` parses the SDF's own `M CHG` records directly
+(authoritative, no guessing) and writes the summed net charge to a
+`<ligand>.net_charge` sidecar. `build_topology_once.py` reads it and
+monkeypatches `unigbsa.simulation.topology.obtain_net_charge` to return
+that exact value, bypassing the lossy OpenBabel round-trip entirely.
+Validated with real `antechamber`/`sqm`/`acpype`: all 7 dyns build their
+full receptor+ligand topology with exit 0.
+
+## Ligand atom identity (SDF naming vs the real MD frame's naming)
+
+`fix_ligand_naming.py` used to number atoms sequentially by
+element-appearance-order in the SDF (O1, C1, C2, ...) and trust that this
+happened to match the raw MD frame's own atom naming - flagged as an
+unverified assumption in this file's docstring from the start. Confirmed
+false on every one of the 7 real GPCRmd ligands tested: the raw frame's
+naming (CHARMM/PSF-style, e.g. hydrogens named by parent atom like
+`H12X`/`H12Y`, or a PDB-CCD-style scheme like `CAI`/`HAIX`/`HAIY`/`HAIZ`)
+has no relation to the SDF's naive ordering. `build_trajectory_v2.py`'s
+by-name ligand matching silently paired up whichever atoms happened to
+share a name and froze the rest at the reference build's pose - worse
+than a crash, since it doesn't fail loudly.
+
+Verified these are genuinely the same molecule, not a wrong-file problem,
+before trusting a fix: element counts match exactly between the raw frame
+and the SDF for both dyn 15 (Y00: C18 N1 O3 H24) and dyn 25 (5FW: C11 N1
+O3 H18).
+
+Fix, in `fix_ligand_naming.py`: try direct name matching against a raw
+frame first (`-frame-pdb`); only if that isn't a full match, fall back to
+real bond-graph matching - build the ligand's bond graph two ways (the
+SDF's own authoritative bonds, and a geometry-perceived graph from the raw
+frame's real 3D coordinates via RDKit's `rdDetermineBonds` - distance-based,
+no OpenBabel) and graph-match them (element + connectivity only, ignoring
+bond order/charge, which don't affect topological identity) via RDKit's
+substructure matching. Raises rather than returning a partial match - a
+wrong guess here is worse than a loud failure.
+
+This mapping can't just be written into the output mol2's atom names,
+though: confirmed `acpype`/`antechamber` ignores whatever name is written
+in the input mol2 entirely and re-numbers every atom generically by
+element + file order in its own output topology (checked directly - an
+input mol2 written with real frame names and one written with plain
+generic names produced byte-identical ligand atom ordering in the built
+reference `complex.pdb`). So the mol2 body keeps the generic name scheme
+acpype already reproduces reliably, and the real correspondence instead
+goes into a `<ligand>.atom_map` sidecar (generic name -> real frame name).
+`build_trajectory_v2.py -ligand-atom-map` translates through it before
+the by-name lookup. All 7 dyns needed the graph-matching fallback (none
+had directly-coinciding names) and all 7 resolved 100% of atoms - a sanity
+check that held up independently: dyn 15's one nitrogen happens to be
+named "N1" in both the SDF and the raw frame, and the graph match landed
+it there on its own. Validated end-to-end: `build_trajectory_v2.py` now
+reports `0 kept-from-reference` for both protein and ligand on all 7 dyns.

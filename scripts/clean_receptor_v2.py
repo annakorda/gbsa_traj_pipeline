@@ -1,63 +1,13 @@
 #!/usr/bin/env python3
 """
-Standalone receptor-only PDB cleaner for GBSA / GROMACS pdb2gmx input.
-Takes a raw protein PDB (any source: crystal structure, MD frame, etc.)
-and produces a GROMACS/amber-ff-compatible protein-only PDB.
+Standalone receptor-only PDB cleaner for GBSA/GROMACS pdb2gmx input.
+Takes a raw protein PDB and produces a GROMACS/amber-ff-compatible
+protein-only PDB: translates CHARMM histidine tautomers to their AMBER
+names, renames disulfide-bonded CYS to CYX, and splits N-/C-terminal
+ACE/NME caps into standalone residues (any number of fragments per chain).
 
-v2 - changes vs clean_receptor.py, all confirmed against the actual
-amber99sb-ildn.ff files installed in this env (aminoacids.rtp,
-specbond.dat) before writing, not assumed:
-
-1. Histidine tautomer is now PRESERVED, not discarded. v1 collapsed
-   HSD/HSE/HSP (and HID/HIE/HIP) all to generic "HIS", after which
-   pdb2gmx (called downstream with no -his flag) silently applies one
-   uniform default tautomer to every histidine - wrong for whichever
-   ones weren't actually that state, causing their sidechain HD1/HE2
-   to permanently mismatch (see DEBUG_FROZEN_ATOM_CLASHES.md, cause 1).
-   v2 translates CHARMM names to their literal AMBER equivalents
-   instead: HSD->HID, HSE->HIE, HSP->HIP. Confirmed amber99sb-ildn.ff's
-   aminoacids.rtp defines HID/HIE/HIP directly as residues, so pdb2gmx
-   builds the correct sidechain per-residue automatically, no -his
-   flag or interactive prompt needed.
-
-2. Disulfide bonds are now actually communicated to pdb2gmx. v1
-   detected SG-SG distances <=2.2 A and wrote CONECT records, but
-   pdb2gmx does not read CONECT for bonding, and the residues were
-   still left named plain CYS - relying entirely on pdb2gmx's own
-   specbond.dat distance-based auto-detection, which (confirmed by
-   reading specbond.dat) triggers an interactive per-pair prompt that
-   the topology-build step's single piped "1" cannot reliably answer
-   for every pair. v2 renames both residues of each detected disulfide
-   pair from CYS to CYX directly. Confirmed amber99sb-ildn.ff's
-   aminoacids.rtp defines CYX directly, so pdb2gmx builds the bonded
-   topology deterministically with no auto-detection or prompt at all.
-
-3. N-terminal ACE cap and C-terminal NME cap are both split into their
-   own standalone residues (CAY/CY/OY -> CH3/C/O as ACE; NT/CAT -> CH3/N
-   as NME - matching amber99sb-ildn's own ACE/NME entries). Two earlier
-   attempts at this (splitting only here, on the topology-building side)
-   were tried and reverted after actually testing them: splitting here
-   alone changes the reference's residue COUNT relative to the raw
-   frame (which still has the caps fused into their neighbor residue),
-   which breaks build_trajectory.py's pure ordinal-based matching -
-   either by shifting every downstream residue's ordinal (the ACE case:
-   confirmed reference ordinal 1 = MET's real atoms silently getting
-   matched against frame ordinal 1 = PRO's real atoms - undetectable,
-   far worse than not fixing it), or, appended at the end (the NME
-   case), by creating a reference ordinal with nothing to match at all
-   (the entire NME residue froze instead of just 2 atoms).
-   The fix that actually works, verified end-to-end (topology build +
-   real matching against all 3 test frames, checked the same ordinal
-   alignment that caught the earlier regressions): split the SAME way
-   on BOTH sides. This file does the reference/topology-building half.
-   build_trajectory_v2.py does the matching half - it applies the
-   identical split to each raw frame before computing ordinals, so
-   reference and frame residue counts stay identical throughout, and
-   the AMBER<->CHARMM name aliases needed for the caps' own atoms
-   (CH3/C/O/N vs CAY/CY/OY/NT/CAT) live there. Do not use either script
-   without the other - a topology built here now has 2 more residues
-   than v1, and only the paired build_trajectory_v2.py knows to expect
-   that.
+Must always be paired with build_trajectory_v2.py, which applies the
+identical residue/cap handling to each raw frame - see NOTES.md for why.
 """
 import re
 import sys
@@ -178,65 +128,89 @@ def _residue_blocks(atoms):
     return blocks, keys
 
 
+def _unique_adjacent_key(chain, base_resseq, used_keys):
+    """A (chain, resseq, icode) key that doesn't collide with any existing
+    residue, by reusing the adjacent real residue's resSeq with a fresh
+    insertion code (see NOTES.md for why plain resseq+-1 isn't safe)."""
+    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        key = (chain, base_resseq, letter)
+        if key not in used_keys:
+            return key
+    raise ValueError(f"Could not find a free insertion code near resseq {base_resseq!r} on chain '{chain}'")
+
+
 def split_terminal_caps(atoms):
     """
-    Split CHARMM N-/C-terminal cap atoms fused onto the first/last residue
-    of each chain into standalone ACE/NME residues (renamed to amber
-    naming), matching amber99sb-ildn's own ACE/NME rtp entries. Must be
-    paired with build_trajectory_v2.py, which applies the identical split
-    to each raw frame - see this file's module docstring for why.
+    Split CHARMM N-/C-terminal cap atoms fused onto a residue into standalone
+    ACE/NME residues (amber naming), matching amber99sb-ildn's own ACE/NME
+    rtp entries. Must be paired with build_trajectory_v2.py, which applies
+    the identical split to each raw frame.
+
+    Handles any number of independently-capped fragments per chain (e.g. an
+    ICL3-truncated construct), not just one ACE/NME pair at the chain's
+    first/last residue - see NOTES.md.
     """
     blocks, keys = _residue_blocks(atoms)
-    first_idx_of_chain, last_idx_of_chain = {}, {}
-    for idx, key in enumerate(keys):
-        chain = key[0]
-        if chain not in first_idx_of_chain:
-            first_idx_of_chain[chain] = idx
-        last_idx_of_chain[chain] = idx
+    used_keys = set(keys)
+
+    nterm_atoms_per_block = [[a for a in b if a["name"].strip().upper() in NTERM_CAP_ATOMS] for b in blocks]
+    cterm_atoms_per_block = [[a for a in b if a["name"].strip().upper() in CTERM_CAP_ATOMS] for b in blocks]
 
     out = []
-    n_ace, n_nme = 0, 0
+    n_ace, n_nme, n_fragments = 0, 0, 0
+    expect_fragment_start = {}  # chain -> bool
+    frag_id_of_chain = {}       # chain -> current fragment counter, for TER placement
     for idx, block in enumerate(blocks):
         chain = block[0]["chain"]
-        nterm_atoms = [a for a in block if a["name"].strip().upper() in NTERM_CAP_ATOMS]
-        cterm_atoms = [a for a in block if a["name"].strip().upper() in CTERM_CAP_ATOMS]
+        nterm_atoms = nterm_atoms_per_block[idx]
+        cterm_atoms = cterm_atoms_per_block[idx]
+        is_fragment_start = expect_fragment_start.get(chain, True)  # unseen chain -> starts a fragment
 
-        if nterm_atoms and idx != first_idx_of_chain[chain]:
-            raise ValueError(f"ACE-cap atoms found on a non-first residue of chain '{chain}' "
-                              f"(resseq {block[0]['resseq']}) - refusing to split, investigate first.")
-        if cterm_atoms and idx != last_idx_of_chain[chain]:
-            raise ValueError(f"NME-cap atoms found on a non-last residue of chain '{chain}' "
-                              f"(resseq {block[0]['resseq']}) - refusing to split, investigate first.")
+        if nterm_atoms and not is_fragment_start:
+            raise ValueError(
+                f"ACE-cap atoms found on chain '{chain}' resseq {block[0]['resseq']}, but the "
+                f"preceding residue of this chain didn't close its own fragment with an NME cap "
+                f"first - refusing to split, investigate first (two open N-termini back to back "
+                f"isn't a real construct)."
+            )
+
+        if is_fragment_start:
+            frag_id_of_chain[chain] = frag_id_of_chain.get(chain, 0) + 1
+            n_fragments += 1
+        frag_id = frag_id_of_chain[chain]
 
         rest = [a for a in block if a not in nterm_atoms and a not in cterm_atoms]
 
         if nterm_atoms:
-            try:
-                ace_resseq = f"{int(block[0]['resseq']) - 1:>4d}"
-            except ValueError:
-                ace_resseq = block[0]["resseq"]
+            ace_key = _unique_adjacent_key(chain, block[0]["resseq"], used_keys)
+            used_keys.add(ace_key)
             for a in nterm_atoms:
                 a["name"] = NTERM_CAP_ATOMS[a["name"].strip().upper()]
                 a["resname"] = "ACE"
-                a["resseq"] = ace_resseq
+                a["resseq"], a["icode"] = ace_key[1], ace_key[2]
+                a["_frag"] = (chain, frag_id)
             out.extend(nterm_atoms)
             n_ace += 1
 
+        for a in rest:
+            a["_frag"] = (chain, frag_id)
         out.extend(rest)
 
         if cterm_atoms:
-            try:
-                nme_resseq = f"{int(block[0]['resseq']) + 1:>4d}"
-            except ValueError:
-                nme_resseq = block[0]["resseq"]
+            nme_key = _unique_adjacent_key(chain, block[0]["resseq"], used_keys)
+            used_keys.add(nme_key)
             for a in cterm_atoms:
                 a["name"] = CTERM_CAP_ATOMS[a["name"].strip().upper()]
                 a["resname"] = "NME"
-                a["resseq"] = nme_resseq
+                a["resseq"], a["icode"] = nme_key[1], nme_key[2]
+                a["_frag"] = (chain, frag_id)
             out.extend(cterm_atoms)
             n_nme += 1
+            expect_fragment_start[chain] = True  # this fragment just closed; next block starts a new one
+        else:
+            expect_fragment_start[chain] = False
 
-    return out, n_ace, n_nme
+    return out, n_ace, n_nme, n_fragments
 
 
 def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=None, verbose=True):
@@ -306,7 +280,7 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
     if not atoms:
         raise ValueError(f"No atoms survived cleaning for {input_pdb} (check chain/resname filters)")
 
-    atoms, n_ace, n_nme = split_terminal_caps(atoms)
+    atoms, n_ace, n_nme, n_fragments = split_terminal_caps(atoms)
 
     sg = []
     for i, d in enumerate(atoms):
@@ -346,15 +320,16 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
     serial_of = {}
     with open(output_pdb, "w") as out:
         serial = 1
-        prev_chain = None
+        prev_frag = None
         for i, d in enumerate(atoms):
-            cur_chain = d["chain"].strip() or "_"
-            if prev_chain is not None and cur_chain != prev_chain:
+            # TER on chain change and on fragment change within a chain (see NOTES.md).
+            cur_frag = d.get("_frag", (d["chain"].strip() or "_", 0))
+            if prev_frag is not None and cur_frag != prev_frag:
                 out.write("TER\n")
             serial_of[i] = serial
             out.write(fmt_atom(d, serial))
             serial += 1
-            prev_chain = cur_chain
+            prev_frag = cur_frag
         out.write("TER\n")
         for i, j in sorted(conect_idx):
             a, b = serial_of[i], serial_of[j]
@@ -372,7 +347,9 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
         print(f"  Disulfide bonds detected (SG-SG <= 2.2 A) and renamed CYS->CYX: {n_cyx} residue(s), "
               f"{len(conect_idx)} bond(s)")
         print(f"  Terminal caps split into standalone residues: {n_ace} ACE, {n_nme} NME "
-              f"(must be matched by build_trajectory_v2.py, not v1's build_trajectory.py)")
+              f"(must be matched by build_trajectory_v2.py)")
+        print(f"  Polypeptide fragments detected: {n_fragments} "
+              f"({'single continuous chain' if n_fragments == len(chains_kept) else 'chain fused from multiple segments'})")
 
 
 def main():

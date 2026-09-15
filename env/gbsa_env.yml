@@ -111,6 +111,7 @@ dependencies:
   - pixman=0.46.4=h54a6638_1
   - pthread-stubs=0.4=hb9d3cd8_1002
   - pyparsing=3.2.3=pyhe01879c_2
+  - rdkit=2024.03.6
   - python=3.9.23=hc30ae73_0_cpython
   - python-dateutil=2.9.0.post0=pyhe01879c_2
   - python_abi=3.9=8_cp39

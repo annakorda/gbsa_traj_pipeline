@@ -1,65 +1,20 @@
 #!/usr/bin/env python3
 """
-Remap N raw per-frame complex PDBs (protein+ligand, from whatever MD
-engine) onto the fixed atom order of the reference topology built by
-build_topology_once.py, and concatenate them into a multi-MODEL
-trajectory PDB for unigbsa-traj.
+Remap N raw per-frame complex PDBs (protein+ligand) onto the fixed atom
+order of the reference topology built by build_topology_once.py, and
+concatenate them into a multi-MODEL trajectory PDB for unigbsa-traj.
 
-v2 - changes vs build_trajectory.py:
+Matching: protein atoms by (residue ordinal position, atom name) - not
+literal chain/resnum, since pdb2gmx drops/renumbers those. Ligand atoms
+by name, translated through -ligand-atom-map first if given (see
+NOTES.md - SDF and raw-frame ligand naming rarely coincide directly).
 
-1. Reporting/safety-check only, no matching-logic change: protein and
-   ligand match/kept counts are now reported separately per frame
-   instead of combined (v1 combined them, which could mask a
-   ligand-specific matching problem inside an overall count that still
-   "looks fine" because the much larger protein atom count dominates
-   it), and a warning prints if any ligand atom fails to match (should
-   always be 0 or all - there's exactly one copy, matched by name
-   only). Ligand naming (fix_ligand_naming.py) itself is untouched.
+Requires a reference built by clean_receptor_v2.py (first residue ACE,
+last NME) - refuses to run otherwise. See NOTES.md for why.
 
-2. Terminal-cap handling, paired with clean_receptor_v2.py: that script
-   now splits the CHARMM N-terminal ACE cap and C-terminal NME cap into
-   standalone residues in the REFERENCE topology (2 attempts at doing
-   this on the topology side only were tried and reverted - see that
-   file's docstring for why: it changes the reference's residue count
-   relative to the raw frame, which breaks pure ordinal matching,
-   either by shifting every downstream ordinal, or by creating a
-   reference ordinal with nothing to match). The fix that actually
-   works: split the SAME way on the FRAME side too, right here, before
-   computing ordinals - so reference and frame residue counts match
-   throughout, at every ordinal, not just count-for-count overall.
-   split_frame_terminal_caps() below does that, renaming the raw
-   CHARMM cap atom names directly to their AMBER equivalents so no new
-   alias-table entries are needed.
-   Verified end-to-end: built the topology, ran this against all 3
-   test frames, and directly re-checked that reference ordinal 1 still
-   matches frame ordinal 1's real MET atoms (not a neighboring
-   residue's) - the exact check that caught the two reverted attempts.
-
-   This version of the script REQUIRES a reference built by
-   clean_receptor_v2.py (first residue literally named ACE, last
-   literally named NME) - it will refuse to run against an
-   unsplit/v1-style reference rather than silently misalign everything.
-
-Matching rule (unchanged from v1):
-  - protein atoms: matched by (residue ORDINAL POSITION, atom name).
-    Not by literal chain/resnum - pdb2gmx drops the chain ID and
-    renumbers residues (confirmed: the ligand occupies residue slot 1
-    in the built topology, shifting every protein residue by +1), so
-    literal (chain, resnum) never lines up. Ordinal position (1st
-    residue encountered, 2nd, ...) survives that renumbering as long
-    as residue order/count is unchanged, which it is here.
-  - ligand atoms: matched by atom name only (there's one copy).
-    Also note: unigbsa's build_lignad() hardcodes the ligand residue
-    name to "MOL" regardless of what your input mol2 called it - that
-    is why -ref-ligand-resname defaults to MOL, not your real ligand's
-    resname.
-
-Any reference atom with no match in a given frame (typically the
-receptor hydrogens, which pdb2gmx rebuilt fresh and which never
-existed in the raw MD frame) keeps its reference-build coordinate.
-Check the printed match counts per frame before trusting the output -
-a low match count on the protein or ligand means the matching
-assumption above doesn't hold for your files.
+Any reference atom with no match in a given frame (typically receptor
+hydrogens pdb2gmx rebuilt fresh) keeps its reference-build coordinate -
+check the printed match counts per frame before trusting the output.
 """
 import argparse
 
@@ -141,37 +96,44 @@ def split_frame_terminal_caps(atoms, ligand_resname):
     """
     Mirror clean_receptor_v2.py's ACE/NME cap split on a raw MD frame, so
     frame residue ordinals line up with a reference built by that script.
-    Renames the CHARMM cap atom names to their AMBER equivalents in place
-    (no alias-table entries needed for them). Ligand atoms are skipped
-    entirely - they never count as a protein residue here.
+    Renames the CHARMM cap atom names to their AMBER equivalents in place.
+    Ligand atoms are skipped - they never count as a protein residue here.
+
+    Handles any number of independently-capped fragments per chain, matching
+    clean_receptor_v2.py's split_terminal_caps() - see NOTES.md.
     """
     blocks, _ = _residue_blocks(atoms)
-    protein_idx = [i for i, b in enumerate(blocks) if b[0]["resname"].upper() != ligand_resname.upper()]
+    protein_idx = {i for i, b in enumerate(blocks) if b[0]["resname"].upper() != ligand_resname.upper()}
     if not protein_idx:
         return atoms
 
-    first_of_chain, last_of_chain = {}, {}
-    for i in protein_idx:
-        chain = blocks[i][0]["chain"]
-        first_of_chain.setdefault(chain, i)
-        last_of_chain[chain] = i
+    nterm_atoms_per_block = {i: [a for a in blocks[i] if a["name"].strip().upper() in NTERM_CAP_RENAME]
+                              for i in protein_idx}
+    cterm_atoms_per_block = {i: [a for a in blocks[i] if a["name"].strip().upper() in CTERM_CAP_RENAME]
+                              for i in protein_idx}
 
     out = []
+    expect_fragment_start = {}  # chain -> bool
     for i, block in enumerate(blocks):
-        if i not in first_of_chain.values() and i not in last_of_chain.values():
+        if i not in protein_idx:
             out.extend(block)
             continue
+
         chain = block[0]["chain"]
-        nterm = [a for a in block if a["name"].strip().upper() in NTERM_CAP_RENAME]
-        cterm = [a for a in block if a["name"].strip().upper() in CTERM_CAP_RENAME]
-        if nterm and i != first_of_chain.get(chain):
-            raise ValueError(f"Frame has ACE-cap-style atom names on a non-first residue of "
-                              f"chain '{chain}' (resseq {block[0]['resseq']}) - unexpected, investigate.")
-        if cterm and i != last_of_chain.get(chain):
-            raise ValueError(f"Frame has NME-cap-style atom names on a non-last residue of "
-                              f"chain '{chain}' (resseq {block[0]['resseq']}) - unexpected, investigate.")
+        nterm = nterm_atoms_per_block[i]
+        cterm = cterm_atoms_per_block[i]
+        is_fragment_start = expect_fragment_start.get(chain, True)  # unseen chain -> starts a fragment
+
+        if nterm and not is_fragment_start:
+            raise ValueError(
+                f"Frame has ACE-cap-style atom names on chain '{chain}' resseq {block[0]['resseq']}, "
+                f"but the preceding residue of this chain didn't close its own fragment with an "
+                f"NME cap first - unexpected, investigate."
+            )
+
         if not nterm and not cterm:
             out.extend(block)
+            expect_fragment_start[chain] = False
             continue
 
         orig_resseq = block[0]["resseq"]  # cache before any mutation - block[0] IS one of the cap
@@ -192,11 +154,15 @@ def split_frame_terminal_caps(atoms, ligand_resname):
                 a["resname"] = "NME"
                 a["resseq"] = f"{orig_resseq}~NME"
             out.extend(cterm)
+            expect_fragment_start[chain] = True  # this fragment just closed; next block starts a new one
+        else:
+            expect_fragment_start[chain] = False
 
     return out
 
 
-def remap_frame(reference_atoms, ref_ordinals, frame_atoms, ligand_resname, ref_ligand_resname):
+def remap_frame(reference_atoms, ref_ordinals, frame_atoms, ligand_resname, ref_ligand_resname,
+                 ligand_atom_map=None):
     frame_ordinals = assign_residue_ordinals(frame_atoms, ligand_resname)
 
     protein_lookup = {}
@@ -212,7 +178,12 @@ def remap_frame(reference_atoms, ref_ordinals, frame_atoms, ligand_resname, ref_
     for ref, ordinal in zip(reference_atoms, ref_ordinals):
         is_ligand = ref["resname"].upper() == ref_ligand_resname.upper()
         if is_ligand:
-            src = ligand_lookup.get(ref["name"].upper())
+            # ligand_atom_map translates the reference's generic acpype name
+            # to the raw frame's real atom name - see NOTES.md.
+            name = ref["name"].upper()
+            if ligand_atom_map:
+                name = ligand_atom_map.get(name, name)
+            src = ligand_lookup.get(name)
         else:
             name = ref["name"].upper()
             src = protein_lookup.get((ordinal, name))
@@ -241,8 +212,20 @@ def main():
     parser.add_argument("-ref-ligand-resname", default="MOL", dest="ref_ligand_resname",
                          help="Ligand residue name in the built reference topology "
                               "(unigbsa hardcodes this to MOL in build_lignad(), regardless of your input file's resname)")
+    parser.add_argument("-ligand-atom-map", dest="ligand_atom_map", default=None,
+                         help="Path to the <ligand>.atom_map sidecar written by fix_ligand_naming.py.")
     parser.add_argument("-o", dest="outfile", default="trajectory.pdb")
     args = parser.parse_args()
+
+    ligand_atom_map = None
+    if args.ligand_atom_map:
+        ligand_atom_map = {}
+        with open(args.ligand_atom_map) as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) == 2:
+                    ligand_atom_map[parts[0].upper()] = parts[1].upper()
+        print(f"Loaded {len(ligand_atom_map)} ligand atom name mappings from {args.ligand_atom_map}")
 
     reference_atoms = parse_pdb_atoms(args.ref)
     ref_ordinals = assign_residue_ordinals(reference_atoms, args.ref_ligand_resname)
@@ -260,8 +243,7 @@ def main():
         raise SystemExit(
             f"This script requires a reference topology built by clean_receptor_v2.py, whose first "
             f"residue must be ACE and last must be NME (got '{first_resname}' / '{last_resname}'). "
-            f"Using this script against a v1-style (unsplit) reference will silently misalign every "
-            f"residue - refusing to run. Use build_trajectory.py (v1) for a v1-style reference instead."
+            f"An unsplit reference will silently misalign every residue - refusing to run."
         )
 
     any_ligand_mismatch = False
@@ -270,7 +252,8 @@ def main():
             frame_atoms = parse_pdb_atoms(framefile)
             frame_atoms = split_frame_terminal_caps(frame_atoms, args.ligand_resname)
             lines, counts = remap_frame(
-                reference_atoms, ref_ordinals, frame_atoms, args.ligand_resname, args.ref_ligand_resname
+                reference_atoms, ref_ordinals, frame_atoms, args.ligand_resname, args.ref_ligand_resname,
+                ligand_atom_map=ligand_atom_map,
             )
             print(f"Frame {i} ({framefile}): "
                   f"protein {counts['protein_matched']} matched / {counts['protein_kept']} kept-from-reference "
@@ -280,9 +263,8 @@ def main():
             if counts["ligand_kept"] > 0:
                 any_ligand_mismatch = True
                 print(f"  WARNING: {counts['ligand_kept']} ligand atom(s) did not match by name in this frame - "
-                      f"they are frozen at the reference build's coordinate. Check that "
-                      f"fix_ligand_naming.py's assigned names actually correspond to this frame's ligand atom "
-                      f"names/order (see the caveat in that script's docstring).")
+                      f"they are frozen at the reference build's coordinate. Pass -ligand-atom-map "
+                      f"(see NOTES.md) if you haven't already.")
             out.write(f"MODEL{i:>9d}\n")
             for line in lines:
                 out.write(line + "\n")

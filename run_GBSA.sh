@@ -10,16 +10,11 @@
 
 set -euo pipefail
 
-# repo_root is derived, not hardcoded, so this script works unmodified from
-# anyone's own checkout. SLURM sets SLURM_SUBMIT_DIR to wherever `sbatch` was
-# run from (per the README: cd into your own clone, then `sbatch run_GBSA.sh`)
-# - that's always the right repo_root. The $(pwd) fallback is only for
-# running this script directly with bash (no SLURM) while testing.
+# repo_root: derived from SLURM_SUBMIT_DIR (see NOTES.md), not hardcoded.
 repo_root="${SLURM_SUBMIT_DIR:-$(pwd)}"
 cd "${repo_root}"
 
-# Per-user overrides (e.g. your own gbsa_env_path if you don't want to reuse
-# Marta's) live in local.env.sh, which is gitignored - see local.env.sh.example.
+# Optional per-user overrides (see local.env.sh.example), gitignored.
 if [ -f "${repo_root}/local.env.sh" ]; then
   source "${repo_root}/local.env.sh"
 fi
@@ -30,10 +25,8 @@ module load Miniconda3/202601
 eval "$(conda shell.bash hook)"
 # Using Marta's already-built env directly (read-only use - activating and
 # running from it doesn't write into the env dir, so this doesn't interfere
-# with her work). Avoids rebuilding the whole env from scratch here. Kept
-# independent of repo_root (not "${repo_root}/gbsa_env") since repo_root is
-# now per-user but the shared env still lives in Marta's checkout regardless
-# of whose repo_root this is - override via local.env.sh if you build your own.
+# with her work). Avoids rebuilding the whole env from scratch here.
+# Override via local.env.sh (gbsa_env_path=...) if you build your own.
 gbsa_env_path="${gbsa_env_path:-/users/gpcr/mlopez/free_energies/gbsa_traj_pipeline/gbsa_env}"
 conda activate "${gbsa_env_path}"
 set -u
@@ -85,8 +78,6 @@ lig_resname=$(jq -r '.lig_resname' "${dyn_config}")
 mapfile -t trajIDs < <(jq -r '.trajIDs[]' "${dyn_config}")
 
 frame_dir="${data_dyn_dir}/fms_${fms}"
-# _v2 suffix: keeps this run's topology/results separate from the original
-# v1 run still sitting in fms_${fms}/ - nothing here overwrites that.
 results_frame_dir="results/${data_source}/${dynID}/fms_${fms}_v2"
 mkdir -p "${results_frame_dir}"
 
@@ -99,8 +90,11 @@ donefile="${data_dyn_dir}/.ligand_prep.done"
   flock -x 200
   if [ ! -f "${donefile}" ]; then
     echo "[$(date)] Task ${SLURM_ARRAY_TASK_ID}: building shared ligand mol2"
+    # -frame-pdb: verifies/resolves real ligand atom names against
+    # initial_frame.pdb (see NOTES.md).
     python3 scripts/fix_ligand_naming.py \
-      -i "${lig_sdf}" -o "${ligand_mol2}" -name "${lig_resname}"
+      -i "${lig_sdf}" -o "${ligand_mol2}" -name "${lig_resname}" \
+      -frame-pdb "${frame_dir}/initial_frame.pdb" -frame-resname "${lig_resname}"
     touch "${donefile}"
   else
     echo "[$(date)] Task ${SLURM_ARRAY_TASK_ID}: ligand mol2 already prepared, skipping"
@@ -131,8 +125,6 @@ echo "[$(date)] Found ${frames} frame PDBs for ${trajID}"
 
 # 2. Clean receptor: each task uses the SAME shared initial_frame.pdb as input,
 #    but writes its own output into its own per-trajID folder -> no write collision.
-# _v2 topo_dir: separate from the original v1 topology_${trajID}/, which used
-# clean_receptor.py/build_trajectory.py (v1) and is left untouched for comparison.
 topo_dir="${data_dyn_dir}/topology_${trajID}_v2"
 mkdir -p "${topo_dir}"
 
@@ -168,12 +160,14 @@ echo "4. python3 scripts/build_trajectory_v2.py \
   -ref ${topo_dir}/complex.pdb \
   -frames ${frame_files[@]} \
   -ligand-resname ${lig_resname} \
+  -ligand-atom-map ${ligand_mol2}.atom_map \
   -o ${combined_pdb}"
 
 python3 scripts/build_trajectory_v2.py \
   -ref "${topo_dir}/complex.pdb" \
   -frames "${frame_files[@]}" \
   -ligand-resname "${lig_resname}" \
+  -ligand-atom-map "${ligand_mol2}.atom_map" \
   -o "${combined_pdb}"
 
 # 5. Score all frames with GB.

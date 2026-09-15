@@ -7,11 +7,16 @@ code path used internally by unigbsa-pipeline's mode=input / mode=em.
 Input: a cleaned receptor-only PDB + a ligand mol2/mol/sdf file.
 Output: complex.top, complex.pdb (reference structure, fixes the atom
 order everything downstream must match), index.ndx.
+
+If a "<ligand>.net_charge" sidecar exists (written by fix_ligand_naming.py),
+forces that value through to acpype/antechamber instead of trusting
+unigbsa's own net-charge auto-detection - see NOTES.md.
 """
 import os
 import shutil
 import argparse
 
+import unigbsa.simulation.topology as _unigbsa_topology
 from unigbsa.simulation.topology import build_topol
 from unigbsa.utils import generate_index_file
 
@@ -31,6 +36,13 @@ def main():
     ligand = os.path.abspath(args.ligand)
     outdir = os.path.abspath(args.outdir)
     os.makedirs(outdir, exist_ok=True)
+
+    charge_file = ligand + ".net_charge"
+    if os.path.exists(charge_file):
+        with open(charge_file) as f:
+            forced_charge = int(f.read().strip())
+        print(f"Overriding unigbsa's net-charge auto-detection with {forced_charge:+d} from {charge_file}.")
+        _unigbsa_topology.obtain_net_charge = lambda ligandfile, _c=forced_charge: _c
 
     cwd = os.getcwd()
     os.chdir(outdir)
