@@ -34,6 +34,7 @@ while [ $# -gt 0 ]; do
 done
 
 set +u
+command -v module >/dev/null 2>&1 && module load Miniconda3/202601
 eval "$(conda shell.bash hook)"
 gbsa_env_path="${gbsa_env_path:-/users/gpcr/mlopez/free_energies/gbsa_traj_pipeline/gbsa_env}"
 conda activate "${gbsa_env_path}"
