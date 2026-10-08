@@ -1,16 +1,9 @@
 #!/bin/bash
-# Non-SLURM smoke-test runner: the same pipeline as run_GBSA.sh (extract ->
-# ligand prep -> clean -> topology -> match -> score), run directly and
-# sequentially for all 3 replicates on any machine with /GPCRmd_files access -
-# no sbatch, no array. Meant for quickly validating a dynID (few frames, fast)
-# before committing to a full 600-frame sbatch production run.
+# Same pipeline as run_GBSA.sh, run directly (no sbatch/array) for a quick
+# smoke test with few frames.
 #
 # Usage: ./run_GBSA_local.sh [-dyn ID] [-frames N] [-nt THREADS]
-# Defaults: -dyn 25 (matches run_GBSA.sh's current config), -frames 1, -nt 4
-#
-# Writes into the same data/GPCRmd/<dynID> and results/GPCRmd/<dynID>/fms_<N>_v2
-# layout run_GBSA.sh uses, so ligand prep (mol2/net_charge/atom_map) done here
-# is reused by a later full run of the same dynID, not redone.
+# Defaults: -dyn 25, -frames 1, -nt 4
 
 set -euo pipefail
 
