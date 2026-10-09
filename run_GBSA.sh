@@ -23,20 +23,13 @@ set +u
 module load VMD
 module load Miniconda3/202601
 eval "$(conda shell.bash hook)"
-# Using Marta's already-built env directly (read-only use - activating and
-# running from it doesn't write into the env dir, so this doesn't interfere
-# with her work). Avoids rebuilding the whole env from scratch here.
-# Override via local.env.sh (gbsa_env_path=...) if you build your own.
+# Uses Marta's already-built env read-only (see NOTES.md). Override via
+# local.env.sh (gbsa_env_path=...) if you build your own.
 gbsa_env_path="${gbsa_env_path:-/users/gpcr/mlopez/free_energies/gbsa_traj_pipeline/gbsa_env}"
 conda activate "${gbsa_env_path}"
 set -u
 
-# gmx_MMPBSA/unigbsa internally calls `mpirun -np <nt> --use-hwthread-cpus`
-# with no way to pass --oversubscribe via the CLI. At higher -nt (e.g. 32),
-# OpenMPI's own slot-detection under this SLURM allocation can come up short
-# and refuse to launch ("not enough slots available") even though the cores
-# were actually granted - this env var is OpenMPI's equivalent of
-# --oversubscribe, applied globally so the internal mpirun call picks it up.
+# Fixes an OpenMPI slot-detection issue under SLURM (see NOTES.md).
 export OMPI_MCA_rmaps_base_oversubscribe=1
 
 # --- config -------------------------------------------------------------
@@ -105,11 +98,7 @@ donefile="${data_dyn_dir}/.ligand_prep.done"
 trajID=${trajIDs[$SLURM_ARRAY_TASK_ID]}
 echo "[$(date)] Task ${SLURM_ARRAY_TASK_ID}: trajID=${trajID}"
 
-# Check required snapshots (pdbs) match the introduced number of frames per traj id
-# NOTE: a plain glob here sorts lexicographically (..._100.pdb before ..._2.pdb),
-# scrambling frame order - confirmed by testing bash's actual glob expansion.
-# MODEL N in the scored trajectory must be the N-th frame numerically, not the
-# N-th glob match, so sort numerically by the trailing frame number instead.
+# Sort numerically, not by glob order (see NOTES.md - frame ordering).
 mapfile -t frame_files < <(
   for f in "${frame_dir}"/"${trajID}"_[0-9]*.pdb; do
     n=$(basename "$f" .pdb); n=${n##*_}

@@ -232,6 +232,7 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
     n_dropped_h = 0
     his_translated_residues = set()
     dropped_resnames = set()
+    lys_hz3 = set()  # LYS residues with a 3rd NZ hydrogen -> protonated, keep as LYS
 
     with open(input_pdb) as f:
         for line in f:
@@ -258,6 +259,8 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
                 continue
 
             nm = d["name"].strip().upper()
+            if rn == "LYS" and nm == "HZ3":
+                lys_hz3.add((chain, d["resseq"], d["icode"]))
 
             if is_hydrogen(d):
                 n_dropped_h += 1
@@ -281,6 +284,17 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
         raise ValueError(f"No atoms survived cleaning for {input_pdb} (check chain/resname filters)")
 
     atoms, n_ace, n_nme, n_fragments = split_terminal_caps(atoms)
+
+    # LYS with no 3rd NZ hydrogen in the input -> neutral, rename to LYN
+    # (amber99sb-ildn defines LYN directly; see NOTES.md).
+    n_lyn = 0
+    lys_keys = {(a["chain"], a["resseq"], a["icode"]) for a in atoms
+                if a["resname"].strip().upper() == "LYS"}
+    for key in lys_keys - lys_hz3:
+        for a in atoms:
+            if (a["chain"], a["resseq"], a["icode"]) == key and a["resname"].strip().upper() == "LYS":
+                a["resname"] = "LYN"
+        n_lyn += 1
 
     sg = []
     for i, d in enumerate(atoms):
@@ -344,6 +358,7 @@ def clean_receptor_pdb(input_pdb, output_pdb, chains=None, extra_drop_resnames=N
               f"{n_dropped_altloc} alt-conformers, {n_dropped_chain} wrong-chain atoms")
         print(f"  Histidine tautomers translated to AMBER naming (HSD/HSE/HSP -> HID/HIE/HIP): "
               f"{len(his_translated_residues)} residue(s)")
+        print(f"  Neutral lysines (no HZ3) renamed LYS->LYN: {n_lyn} residue(s)")
         print(f"  Disulfide bonds detected (SG-SG <= 2.2 A) and renamed CYS->CYX: {n_cyx} residue(s), "
               f"{len(conect_idx)} bond(s)")
         print(f"  Terminal caps split into standalone residues: {n_ace} ACE, {n_nme} NME "

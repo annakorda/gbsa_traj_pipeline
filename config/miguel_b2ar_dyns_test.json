@@ -1,0 +1,170 @@
+{
+  "dyn1": {
+    "dyn_id": 1,
+    "system": "brl3515a",
+    "state": "active",
+    "lig_sname": "H98",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_active/build/beta2_brl3515a/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_brl3515a_active_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_brl3515a_active_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_brl3515a_active_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/BRL 35135A_122186.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn2": {
+    "dyn_id": 2,
+    "system": "BRL_35135A",
+    "state": "inactive",
+    "lig_sname": "H98",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_inactive/build/beta2_BRL_35135A/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_BRL_35135A_inactive_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_BRL_35135A_inactive_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_BRL_35135A_inactive_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/BRL 35135A_122186.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn3": {
+    "dyn_id": 3,
+    "system": "brl37344",
+    "state": "active",
+    "lig_sname": "H98",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_active/build/beta2_brl37344/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_brl37344_active_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_brl37344_active_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_brl37344_active_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/BRL 37344_9841972.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn4": {
+    "dyn_id": 4,
+    "system": "brl37344",
+    "state": "inactive",
+    "lig_sname": "H98",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_inactive/build/beta2_brl37344/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_brl37344_inactive_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_brl37344_inactive_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_brl37344_inactive_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/BRL 37344_9841972.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn5": {
+    "dyn_id": 5,
+    "system": "clenbuterol",
+    "state": "active",
+    "lig_sname": "ALE",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_active/build/beta2_clenbuterol/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_clenbuterol_active_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_clenbuterol_active_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_clenbuterol_active_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/Clenbuterol_2783.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn6": {
+    "dyn_id": 6,
+    "system": "clenbuterol",
+    "state": "inactive",
+    "lig_sname": "ALE",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_inactive/build/beta2_clenbuterol/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_clenbuterol_inactive_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_clenbuterol_inactive_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_clenbuterol_inactive_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/Clenbuterol_2783.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn7": {
+    "dyn_id": 7,
+    "system": "cyanopindolol",
+    "state": "inactive",
+    "lig_sname": "P32",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_inactive/build/beta2_cyanopindolol/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_cyanopindolol_inactive_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_cyanopindolol_inactive_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_cyanopindolol_inactive_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/Cyanopindolol_155346.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn8": {
+    "dyn_id": 8,
+    "system": "tak677",
+    "state": "active",
+    "lig_sname": "H98",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_active/build/beta2_tak677/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tak677_active_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tak677_active_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tak677_active_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/TAK 677_5493324.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn9": {
+    "dyn_id": 9,
+    "system": "tak677",
+    "state": "inactive",
+    "lig_sname": "H98",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_inactive/build/beta2_tak677/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tak677_inactive_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tak677_inactive_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tak677_inactive_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/TAK 677_5493324.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn10": {
+    "dyn_id": 10,
+    "system": "terbutaline",
+    "state": "inactive",
+    "lig_sname": "ALE",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_inactive/build/beta2_terbutaline/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_terbutaline_inactive_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_terbutaline_inactive_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_terbutaline_inactive_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/Terbutaline_5403.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn11": {
+    "dyn_id": 11,
+    "system": "tulobuterol",
+    "state": "active",
+    "lig_sname": "ALE",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_active/build/beta2_tulobuterol/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tulobuterol_active_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tulobuterol_active_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tulobuterol_active_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/Tulobuterol_5606.sdf",
+    "framenums": [500, 500, 500]
+  },
+  "dyn12": {
+    "dyn_id": 12,
+    "system": "tulobuterol",
+    "state": "inactive",
+    "lig_sname": "ALE",
+    "topo_f": "/data/gpcr/shared/inputMiguelB2AR/simulation_output_inactive/build/beta2_tulobuterol/nvt_1/structure.psf",
+    "traj_f": [
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tulobuterol_inactive_new_wrap/nvt_1/1_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tulobuterol_inactive_new_wrap/nvt_2/2_wrapped.xtc",
+      "/data/gpcr/acitores/Wrapping_GPCR_scripts/beta2_tulobuterol_inactive_new_wrap/nvt_3/3_wrapped.xtc"
+    ],
+    "ligand_sdf": "/data/gpcr/shared/inputMiguelB2AR/compounds_sdf_runnable/Tulobuterol_5606.sdf",
+    "framenums": [500, 500, 500]
+  }
+}
